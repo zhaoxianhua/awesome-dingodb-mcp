@@ -17,7 +17,6 @@ from bs4 import BeautifulSoup
 import certifi
 import ssl
 from pydantic import BaseModel
-from pyobvector import ObVecClient, MatchAgainst, l2_distance, inner_product, cosine_distance
 from sqlalchemy import text
 
 # Configure logging
@@ -201,42 +200,6 @@ def execute_sql(sql: str) -> str:
         logger.error(f"SQL executed failed, result: {json_result}")
     return json_result
 
-
-@app.tool()
-def get_ob_ash_report(
-    start_time: str,
-    end_time: str,
-    tenant_id: Optional[int] = None,
-) -> str:
-    """
-    Get Dingodb Active Session History report.
-    ASH can sample the status of all Active Sessions in the system at 1-second intervals, including:
-        Current executing SQL ID
-        Current wait events (if any)
-        Wait time and wait parameters
-        The module where the SESSION is located during sampling (PARSE, EXECUTE, PL, etc.)
-        SESSION status records, such as SESSION MODULE, ACTION, CLIENT ID
-    This will be very useful when you perform performance analysis.RetryClaude can make mistakes. Please double-check responses.
-
-    Args:
-        start_time: Sample Start Time,Format: yyyy-MM-dd HH:mm:ss.
-        end_time: Sample End Time,Format: yyyy-MM-dd HH:mm:ss.
-        tenant_id: Used to specify the tenant ID for generating the ASH Report. Leaving this field blank or setting it to NULL indicates no restriction on the TENANT_ID.
-    """
-    logger.info(
-        f"Calling tool: get_ob_ash_report  with arguments: {start_time}, {end_time}, {tenant_id}"
-    )
-    # Construct the SQL query
-    sql_query = f"""
-        CALL DBMS_WORKLOAD_REPOSITORY.ASH_REPORT('{start_time}','{end_time}', NULL, NULL, NULL, 'TEXT', NULL, NULL, {tenant_id if tenant_id is not None else "NULL"});
-    """
-    try:
-        return execute_sql(sql_query)
-    except Error as e:
-        logger.error(f"Error get ASH report,executing SQL '{sql_query}': {e}")
-        return f"Error get ASH report,{str(e)}"
-
-
 @app.tool(name="get_current_time", description="Get current time")
 def get_current_time() -> str:
     """Get current time from Dingodb database."""
@@ -259,7 +222,7 @@ def get_current_tenant() -> str:
     Get the current tenant name from dingo.
     """
     logger.info("Calling tool: get_current_tenant")
-    sql_query = "SELECT TENANT_NAME,TENANT_ID FROM dingo.DBA_OB_TENANTS"
+    sql_query = "show tenants"
     try:
         return execute_sql(sql_query)
     except Error as e:
@@ -278,7 +241,7 @@ def get_all_server_nodes():
         raise ValueError("Only sys tenant can get all server nodes")
 
     logger.info("Calling tool: get_all_server_nodes")
-    sql_query = "select * from dingo.DBA_OB_SERVERS"
+    sql_query = "select * from dingo.DBA_DINGODB_SERVERS"
     try:
         return execute_sql(sql_query)
     except Error as e:
@@ -296,7 +259,7 @@ def get_resource_capacity():
     if tenant != "sys":
         raise ValueError("Only sys tenant can get resource capacity")
     logger.info("Calling tool: get_resource_capacity")
-    sql_query = "select * from dingo.GV$OB_SERVERS"
+    sql_query = "select * from dingo.GV$DINGODB_SERVERS"
     try:
         return execute_sql(sql_query)
     except Error as e:
@@ -305,7 +268,7 @@ def get_resource_capacity():
 
 
 @app.tool()
-def search_oceanbase_document(keyword: str) -> str:
+def search_dingodb_document(keyword: str) -> str:
     """
     This tool is designed to provide context-specific information about Dingodb to a large language model (LLM) to enhance the accuracy and relevance of its responses.
     The LLM should automatically extracts relevant search keywords from user queries or LLM's answer for the tool parameter "keyword".
@@ -315,16 +278,16 @@ def search_oceanbase_document(keyword: str) -> str:
     This tool ensures that when the LLM’s internal documentation is insufficient to generate high-quality responses, it dynamically retrieves necessary Dingodb information, thereby maintaining a high level of response accuracy and expertise.
     Important: keyword must be Chinese
     """
-    logger.info(f"Calling tool: search_oceanbase_document,keyword:{keyword}")
+    logger.info(f"Calling tool: search_dingodb_document,keyword:{keyword}")
     search_api_url = (
-        "https://cn-wan-api.oceanbase.com/wanApi/forum/docCenter/productDocFile/v3/searchDocList"
+        "https://cn-wan-api.dingodb.com/wanApi/forum/docCenter/productDocFile/v3/searchDocList"
     )
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
-        "Origin": "https://www.oceanbase.com",
-        "Referer": "https://www.oceanbase.com/",
+        "Origin": "https://www.dingodb.com",
+        "Referer": "https://www.dingodb.com/",
     }
     qeury_param = {
         "pageNo": 1,
@@ -346,7 +309,7 @@ def search_oceanbase_document(keyword: str) -> str:
             for item in data_array:
                 doc_url = "https://www.dingo.com/docs/" + item["urlCode"] + "-" + item["id"]
                 logger.info(f"doc_url:${doc_url}")
-                content = get_ob_doc_content(doc_url, item["id"])
+                content = get_dingodb_doc_content(doc_url, item["id"])
                 result_list.append(content)
             return json.dumps(result_list, ensure_ascii=False)
     except error.HTTPError as e:
@@ -357,7 +320,7 @@ def search_oceanbase_document(keyword: str) -> str:
         return "No results were found"
 
 
-def get_ob_doc_content(doc_url: str, doc_id: str) -> dict:
+def get_dingodb_doc_content(doc_url: str, doc_id: str) -> dict:
     doc_param = {"id": doc_id, "url": doc_url}
     doc_param = json.dumps(doc_param).encode("utf-8")
     headers = {
@@ -401,7 +364,7 @@ def get_ob_doc_content(doc_url: str, doc_id: str) -> dict:
                 "description": tdkInfo["description"],
                 "keyword": tdkInfo["keyword"],
                 "content": text,
-                "oceanbase_version": data["version"],
+                "dingodb_version": data["version"],
                 "content_updatetime": data["docGmtModified"],
             }
             return final_result
@@ -563,15 +526,14 @@ def dingodb_vector_search(
         output_cols = ", ".join([f"`{col.strip()}`" for col in output_column_name])
     else:
         output_cols = "*"
-    # 向量格式转换：列表→OB支持的向量字符串（如"[0.1,0.2,0.3]"）
-    vector_str = json.dumps(vector_data).replace(" ", "")  # 去除空格，适配OB语法
+    # 向量格式转换：列表→支持的向量字符串（如"[0.1,0.2,0.3]"）
+    vector_str = json.dumps(vector_data).replace(" ", "")  # 去除空格，适配语法
     # 向量列转义
     vec_col_escaped = f"`{vec_column_name.strip()}`"
     # 表名转义
     table_escaped = f"`{table_name.strip()}`"
 
     # Dingodb向量检索核心语法（余弦相似度降序，取topk）
-    # 注：OB向量函数可根据实际版本调整（如cosine_distance/l2_distance）
     sql = f"""SELECT {output_cols} FROM vector({table_escaped}, {vec_col_escaped}, array{vector_str},{topk})""".strip()  # ASC：余弦相似度值越小，相似度越高
     logger.info(f"Calling tool: Dingodb_vector_search with vector: {vector_str}, topk: {topk}")
     return execute_sql(sql)
@@ -660,6 +622,26 @@ def dingodb_hybrid_search(
     # 4. 调用execute_sql执行混合检索
     logger.info(f"Calling tool: dingodb_hybrid_search with filter: {filter_expr}, topk: {topk}")
     return execute_sql(sql)
+
+@app.tool()
+def query_running_tasks() -> str:
+    """
+    Queries for the tasks currently executing under the current user.
+    """
+    logger.info("Calling tool: dingodb_running_tasks")
+    sql = "select * from INFORMATION_SCHEMA.dingo_sql_job"
+    return execute_sql(sql)
+
+@app.tool()
+def query_time_over_5_minutes_tasks() -> str:
+    """
+    Queries for SQL tasks that take more than 5 minutes to execute under the current user.
+    """
+    logger.info("Calling tool: dingodb_time_over_5_minutes_tasks")
+    sql = "select * from INFORMATION_SCHEMA.processlist where command='query' and time_cost>0"
+    return execute_sql(sql)
+
+
 
 def main():
     """Main entry point to run the MCP server."""
