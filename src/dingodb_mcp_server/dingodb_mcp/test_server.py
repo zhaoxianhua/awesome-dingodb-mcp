@@ -1,4 +1,8 @@
-from .server import execute_sql,list_tables,table_sample,get_current_time,dingodb_text_search,dingodb_vector_search,dingodb_hybrid_search,query_running_tasks,query_time_over_5_minutes_tasks
+from pydingovector.tool.doc_import import DocImport
+from .server import execute_sql, list_tables, table_sample, get_current_time, dingodb_text_search, \
+    dingodb_vector_search, dingodb_hybrid_search, query_running_tasks, query_time_over_5_minutes_tasks, get_db_config, \
+    dingodb_text_2_sql
+
 
 def test_execute_sql():
     res = execute_sql("SELECT * FROM `dingo`.`dingospeed`")
@@ -36,4 +40,17 @@ def test_query_running_tasks():
 
 def test_query_time_over_5_minutes_tasks():
     res = query_time_over_5_minutes_tasks()
+    print(res)
+
+def test_doc_import():
+    di = DocImport(get_db_config())
+    di.import_doc('/Users/zhaoli/Documents/docs/fentai/01.产品/其他资料',"ss_doc")
+
+def test_query_knowledge():
+    di = DocImport(get_db_config())
+    res = di.query_knowledge("GoLang编码规范", table="ss_doc")
+    print(res)
+
+def test_dingodb_text_2_sql():
+    res = dingodb_text_2_sql("查询dingospeed表的前10条数据")
     print(res)
