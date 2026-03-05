@@ -52,5 +52,9 @@ def test_query_knowledge():
     print(res)
 
 def test_dingodb_text_2_sql():
-    res = dingodb_text_2_sql("查询dingospeed表的前10条数据")
+    res = dingodb_text_2_sql("查询dingospeed表的前10条数据，要求online为true")
+    print(res)
+    res = dingodb_text_2_sql("查询org为Qwen，repo为Qwen3-0.6B的model_file_record")
+    print(res)
+    res = dingodb_text_2_sql("查询org为Qwen，repo为Qwen3-0.6B的model_file_record，且model_file_process表存在该record的编号")
     print(res)
