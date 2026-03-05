@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 class MCPConfig(BaseModel):
     """MCP工具配置类（适配MySQL + 开源模型）"""
     # 开源模型配置
-    model_name: str = "/root/mistralai/Mistral-7B-Instruct-v0.2"  # 可替换为其他模型
+    model_path: str = "/root/mistralai/Mistral-7B-Instruct-v0.2"  # 可替换为其他模型
     load_in_4bit: bool = True  # 4位量化，降低显存占用
     temperature: float = 0.1
     max_tokens: int = 500
@@ -63,7 +63,7 @@ class NL2SQLTool:
 
             # 3. 加载 tokenizer 和模型（适配 Mistral 模型）
             tokenizer = AutoTokenizer.from_pretrained(
-                self.model_path,
+                self.mcpConfig.model_path,
                 padding_side="left",
                 truncation_side="left",
                 trust_remote_code=True
@@ -75,12 +75,12 @@ class NL2SQLTool:
             # 加载模型（优先用 MistralForCausalLM，兼容通用 AutoModel）
             try:
                 model = MistralForCausalLM.from_pretrained(
-                    self.model_path, **model_kwargs
+                    self.mcpConfig.model_path, **model_kwargs
                 )
             except Exception:
                 # 兜底：用通用 AutoModel 加载
                 model = AutoModelForCausalLM.from_pretrained(
-                    self.model_path, **model_kwargs
+                    self.mcpConfig.model_path, **model_kwargs
                 )
 
             return tokenizer, model
