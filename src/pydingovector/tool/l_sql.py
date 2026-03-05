@@ -16,14 +16,21 @@ class MCPConfig(BaseModel):
     max_tokens: int = 500
 
     # MySQL数据库配置
-    dbConfig: dict
-
+    host: str
+    port: int
+    user: str
+    password: str
+    database: str
 
 # ===================== 核心工具类 =====================
 class NL2SQLTool:
     def __init__(self, config):
         self.mcpConfig = MCPConfig(
-            dbConfig=config,
+            host=config.host,
+            port=config.port,
+            user=config.user,
+            password=config.password,
+            database=config.database,
         )
         # 初始化LLM客户端
         self.tokenizer, self.generator = self._init_open_source_model()
@@ -85,11 +92,11 @@ class NL2SQLTool:
         """初始化MySQL数据库连接"""
         try:
             conn = pymysql.connect(
-                host=self.mcpConfig.dbConfig.host,
-                port=self.mcpConfig.dbConfig.port,
-                user=self.mcpConfig.dbConfig.user,
-                password=self.mcpConfig.dbConfig.password,
-                database=self.mcpConfig.dbConfig.database,
+                host=self.mcpConfig.host,
+                port=self.mcpConfig.port,
+                user=self.mcpConfig.user,
+                password=self.mcpConfig.password,
+                database=self.mcpConfig.database,
                 charset="utf8mb4",
                 cursorclass=pymysql.cursors.DictCursor  # 让查询结果以字典返回
             )
@@ -133,7 +140,7 @@ class NL2SQLTool:
     <s>[INST]
     你是一个专业的MySQL SQL生成助手，需要将用户的自然语言查询转换为有效的MySQL SQL语句。
     数据库类型：MySQL 8.0+
-    数据库名称：{self.mcpConfig.dbConfig.database}
+    数据库名称：{self.mcpConfig.database}
     数据库结构：
     {db_schema}
 
