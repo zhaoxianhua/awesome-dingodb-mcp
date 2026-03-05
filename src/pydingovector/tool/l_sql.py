@@ -26,11 +26,11 @@ class MCPConfig(BaseModel):
 class NL2SQLTool:
     def __init__(self, config):
         self.mcpConfig = MCPConfig(
-            host=config.host,
-            port=config.port,
-            user=config.user,
-            password=config.password,
-            database=config.database,
+            host=config["host"],
+            port=config["port"],
+            user=config["user"],
+            password=config["password"],
+            database=config["database"],
         )
         # 初始化LLM客户端
         self.tokenizer, self.generator = self._init_open_source_model()
