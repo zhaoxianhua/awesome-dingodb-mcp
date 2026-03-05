@@ -181,26 +181,61 @@ class NL2SQLTool:
         except Exception as e:
             return False, f"SQL校验失败: {str(e)}"
 
-    def generate_sql(self, natural_language_query: str) -> Tuple[Optional[str], Optional[str]]:
-        """生成MySQL SQL语句"""
-        try:
-            prompt = self._build_prompt(natural_language_query)
+    # def generate_sql(self, natural_language_query: str) -> Tuple[Optional[str], Optional[str]]:
+    #     """生成MySQL SQL语句"""
+        # try:
+        #     prompt = self._build_prompt(natural_language_query)
+        #
+        #     # 调用开源模型生成SQL
+        #     response = self.generator(prompt)
+        #     generated_sql = response[0]["generated_text"].split("[/INST]")[-1].strip()
+        #
+        #     # 清理可能的多余文本（模型可能输出额外说明）
+        #     # 只保留第一个分号前的SQL语句
+        #     if ";" in generated_sql:
+        #         generated_sql = generated_sql.split(";")[0] + ";"
+        #
+        #     # 校验SQL
+        #     is_valid, error_msg = self._validate_sql(generated_sql)
+        #     if not is_valid:
+        #         return None, error_msg
+        #
+        #     return generated_sql, None
+        # except Exception as e:
+        #     return None, f"SQL生成失败: {str(e)}"
 
-            # 调用开源模型生成SQL
-            response = self.generator(prompt)
-            generated_sql = response[0]["generated_text"].split("[/INST]")[-1].strip()
 
-            # 清理可能的多余文本（模型可能输出额外说明）
-            # 只保留第一个分号前的SQL语句
-            if ";" in generated_sql:
-                generated_sql = generated_sql.split(";")[0] + ";"
+def generate_sql(self, text):
+    """生成SQL（修复 embedding 输入类型错误）"""
+    try:
+        import torch  # 确保导入torch
 
-            # 校验SQL
-            is_valid, error_msg = self._validate_sql(generated_sql)
-            if not is_valid:
-                return None, error_msg
+        # 1. 文本编码（核心：将字符串转为张量）
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",  # 关键：返回PyTorch张量（不是list/str）
+            padding=True,
+            truncation=True,
+            max_length=512
+        )
+        # 提取输入id和attention_mask（模型必需的张量输入）
+        input_ids = inputs["input_ids"].to(self.generator.device)  # 对齐模型设备（CPU/GPU）
+        attention_mask = inputs["attention_mask"].to(self.generator.device)
 
-            return generated_sql, None
-        except Exception as e:
-            return None, f"SQL生成失败: {str(e)}"
+        # 2. 模型推理（仅传入张量，避免直接传字符串）
+        outputs = self.generator.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=200,  # 生成SQL的最大长度
+            do_sample=False,  # 关闭采样，保证结果稳定
+            temperature=0.1,
+            pad_token_id=self.tokenizer.pad_token_id,
+            eos_token_id=self.tokenizer.eos_token_id
+        )
 
+        # 3. 解码输出（将张量转回字符串）
+        sql = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return sql.strip()
+
+    except Exception as e:
+        raise RuntimeError(f"SQL生成失败: {str(e)}")
