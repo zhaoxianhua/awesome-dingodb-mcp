@@ -209,10 +209,10 @@ class NL2SQLTool:
         """生成SQL（修复 embedding 输入类型错误）"""
         try:
             import torch  # 确保导入torch
-
+            prompt = self._build_prompt(text)
             # 1. 文本编码（核心：将字符串转为张量）
             inputs = self.tokenizer(
-                text,
+                prompt,
                 return_tensors="pt",  # 关键：返回PyTorch张量（不是list/str）
                 padding=True,
                 truncation=True,
