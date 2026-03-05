@@ -1032,14 +1032,14 @@ def dingodb_text_2_sql(natural_language_query: str) -> str:
     config = get_db_config()
     nl2SQLTool = NL2SQLTool(config)
     # 1. 生成SQL
-    sql, sql_error = nl2SQLTool.generate_sql(natural_language_query)
-    if sql_error:
-        return json.dumps({
-            "status": "failed",
-            "error": sql_error,
-            "sql": None,
-            "results": None
-        })
+    sql = nl2SQLTool.generate_sql(natural_language_query)
+    # if sql_error:
+    #     return json.dumps({
+    #         "status": "failed",
+    #         "error": sql_error,
+    #         "sql": None,
+    #         "results": None
+    #     })
     return sql
 
 def main():
