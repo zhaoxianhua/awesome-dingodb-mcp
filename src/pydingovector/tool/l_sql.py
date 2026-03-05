@@ -31,54 +31,39 @@ class NL2SQLTool:
         self.db_conn = self._init_mysql_connection()
 
     def _init_open_source_model(self):
-        """初始化开源模型（兼容 transformers 版本，解决 load_in_4bit 报错）"""
+        """初始化开源模型（移除量化参数，兼容所有 transformers 版本）"""
         try:
             from transformers import (
                 AutoTokenizer,
                 MistralForCausalLM,
                 AutoModelForCausalLM
             )
-            import pkg_resources
-            import bitsandbytes  # 量化加载必需的库
-            import torch
+            import torch  # 导入torch
 
-            # 1. 获取 transformers 版本，判断是否支持 load_in_4bit
-            transformers_version = pkg_resources.get_distribution("transformers").version
-            version = pkg_resources.parse_version(transformers_version)
-            min_support_version = pkg_resources.parse_version("4.29.0")
-
-            # 2. 构建模型加载参数（兼容新旧版本）
+            # 构建基础模型加载参数（无量化参数，避免版本兼容问题）
             model_kwargs = {
-                "device_map": "auto",  # 自动分配设备（CPU/GPU）
-                "trust_remote_code": True
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "low_cpu_mem_usage": True  # 低内存占用，适配CPU/GPU
             }
-            # 仅当 transformers 版本 ≥4.29.0 且安装了 bitsandbytes 时，才添加 load_in_4bit
-            if version >= min_support_version:
-                model_kwargs["load_in_4bit"] = True
-                model_kwargs["bnb_4bit_quant_type"] = "nf4"  # 可选：量化类型，提升性能
-                model_kwargs["bnb_4bit_compute_dtype"] = torch.bfloat16  # 可选：计算精度
-            else:
-                # 旧版本不支持量化，添加 CPU/GPU 兼容参数
-                model_kwargs["low_cpu_mem_usage"] = True
 
-            # 3. 加载 tokenizer 和模型（适配 Mistral 模型）
+            # 加载tokenizer（补充pad_token）
             tokenizer = AutoTokenizer.from_pretrained(
                 self.mcpConfig.model_path,
                 padding_side="left",
                 truncation_side="left",
                 trust_remote_code=True
             )
-            # 补充 pad_token（Mistral 模型默认无 pad_token）
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
 
-            # 加载模型（优先用 MistralForCausalLM，兼容通用 AutoModel）
+            # 加载模型（优先Mistral，兜底通用模型）
             try:
+                # 核心：移除所有load_in_4bit相关参数
                 model = MistralForCausalLM.from_pretrained(
                     self.mcpConfig.model_path, **model_kwargs
                 )
-            except Exception:
-                # 兜底：用通用 AutoModel 加载
+            except Exception as e:
                 model = AutoModelForCausalLM.from_pretrained(
                     self.mcpConfig.model_path, **model_kwargs
                 )
@@ -86,11 +71,15 @@ class NL2SQLTool:
             return tokenizer, model
 
         except ImportError as e:
-            raise RuntimeError(
-                f"导入模型依赖失败: {str(e)}\n请执行：pip3.10 install --upgrade transformers bitsandbytes accelerate")
+            # 依赖缺失提示
+            if "torch" in str(e):
+                raise RuntimeError(f"缺少依赖: {str(e)}\n执行安装：pip3.10 install torch transformers")
+            else:
+                raise RuntimeError(f"缺少依赖: {str(e)}\n执行安装：pip3.10 install transformers")
         except Exception as e:
+            # 简化报错提示，聚焦核心问题
             raise RuntimeError(
-                f"模型加载失败: {str(e)}\n建议检查：1.transformers版本≥4.29.0 2.模型路径正确 3.bitsandbytes安装成功")
+                f"模型加载失败: {str(e)}\n请检查：1.模型路径[{self.mcpConfig.model_path}]是否存在 2.transformers已安装")
 
     def _init_mysql_connection(self) -> pymysql.connections.Connection:
         """初始化MySQL数据库连接"""
