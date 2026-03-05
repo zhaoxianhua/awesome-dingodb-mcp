@@ -40,6 +40,7 @@ class NL2SQLTool:
             )
             import pkg_resources
             import bitsandbytes  # 量化加载必需的库
+            import torch
 
             # 1. 获取 transformers 版本，判断是否支持 load_in_4bit
             transformers_version = pkg_resources.get_distribution("transformers").version
