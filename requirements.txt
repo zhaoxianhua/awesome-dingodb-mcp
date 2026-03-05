@@ -5,4 +5,9 @@ python-dotenv
 beautifulsoup4>=4.13.3
 certifi>=2025.4.26
 requests
-
+mammoth
+langchain_text_splitters
+sentence_transformers
+pymysql
+accelerate
+bitsandbytes

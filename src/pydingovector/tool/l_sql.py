@@ -4,14 +4,13 @@ from typing import Optional, Tuple
 import pymysql  # MySQL连接库
 from pydantic import BaseModel
 from pymysql.err import OperationalError, ProgrammingError
-from safetensors import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 
 class MCPConfig(BaseModel):
     """MCP工具配置类（适配MySQL + 开源模型）"""
     # 开源模型配置
-    model_name: str = "/Users/zhaoli/mistralai/Mistral-7B-Instruct-v0.2"  # 可替换为其他模型
+    model_name: str = "/root/mistralai/Mistral-7B-Instruct-v0.2"  # 可替换为其他模型
     load_in_4bit: bool = True  # 4位量化，降低显存占用
     temperature: float = 0.1
     max_tokens: int = 500
@@ -32,68 +31,65 @@ class NL2SQLTool:
         self.db_conn = self._init_mysql_connection()
 
     def _init_open_source_model(self):
-        """初始化开源大模型（Mistral-7B-Instruct）"""
+        """初始化开源模型（兼容 transformers 版本，解决 load_in_4bit 报错）"""
         try:
-            # 加载Tokenizer
+            from transformers import (
+                AutoTokenizer,
+                MistralForCausalLM,
+                AutoModelForCausalLM
+            )
+            import pkg_resources
+            import bitsandbytes  # 量化加载必需的库
+
+            # 1. 获取 transformers 版本，判断是否支持 load_in_4bit
+            transformers_version = pkg_resources.get_distribution("transformers").version
+            version = pkg_resources.parse_version(transformers_version)
+            min_support_version = pkg_resources.parse_version("4.29.0")
+
+            # 2. 构建模型加载参数（兼容新旧版本）
+            model_kwargs = {
+                "device_map": "auto",  # 自动分配设备（CPU/GPU）
+                "trust_remote_code": True
+            }
+            # 仅当 transformers 版本 ≥4.29.0 且安装了 bitsandbytes 时，才添加 load_in_4bit
+            if version >= min_support_version:
+                model_kwargs["load_in_4bit"] = True
+                model_kwargs["bnb_4bit_quant_type"] = "nf4"  # 可选：量化类型，提升性能
+                model_kwargs["bnb_4bit_compute_dtype"] = torch.bfloat16  # 可选：计算精度
+            else:
+                # 旧版本不支持量化，添加 CPU/GPU 兼容参数
+                model_kwargs["low_cpu_mem_usage"] = True
+
+            # 3. 加载 tokenizer 和模型（适配 Mistral 模型）
             tokenizer = AutoTokenizer.from_pretrained(
-                self.mcpConfig.model_name,
+                self.model_path,
+                padding_side="left",
+                truncation_side="left",
                 trust_remote_code=True
             )
+            # 补充 pad_token（Mistral 模型默认无 pad_token）
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
 
-            # 修复1：根据硬件自动选择兼容的数据类型
-            import torch
-            # 检查是否支持bfloat16（GPU架构/环境）
-            if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8:
-                dtype = torch.bfloat16
-            else:
-                # 不支持bfloat16时用float16（GPU）/float32（CPU）
-                dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-
-            # 修复2：检查accelerate库是否安装，适配device_map参数
-            model_kwargs = {
-                "dtype": dtype,
-                "trust_remote_code": True,
-                "low_cpu_mem_usage": True,
-                "use_safetensors": False if dtype == torch.float16 else True,
-            }
-
-            # 仅当安装了accelerate且有GPU时，才使用device_map
+            # 加载模型（优先用 MistralForCausalLM，兼容通用 AutoModel）
             try:
-                import accelerate  # 检查accelerate是否安装
-                if torch.cuda.is_available():
-                    model_kwargs["device_map"] = "auto"
-                else:
-                    # CPU环境强制使用cpu设备
-                    model_kwargs["device_map"] = "cpu"
-            except ImportError:
-                # 无accelerate时，手动指定设备（放弃auto分配）
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                model_kwargs["device_map"] = device
-                print("警告：未安装accelerate，使用手动设备分配（建议安装accelerate优化大模型加载）")
+                model = MistralForCausalLM.from_pretrained(
+                    self.model_path, **model_kwargs
+                )
+            except Exception:
+                # 兜底：用通用 AutoModel 加载
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.model_path, **model_kwargs
+                )
 
-            # 修复3：禁用4位量化（核心！避免依赖bitsandbytes）
-            # 注释/删除load_in_4bit参数，或强制设为False
-            model = AutoModelForCausalLM.from_pretrained(
-                self.mcpConfig.model_name,
-                load_in_4bit=False,  # 强制禁用量化，无需bitsandbytes
-                **model_kwargs  # 解包参数，兼容有无accelerate的情况
-            )
+            return tokenizer, model
 
-            # 创建文本生成pipeline
-            generator = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                max_new_tokens=self.mcpConfig.max_tokens,
-                temperature=self.mcpConfig.temperature,
-                top_p=0.95,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-            return tokenizer, generator
+        except ImportError as e:
+            raise RuntimeError(
+                f"导入模型依赖失败: {str(e)}\n请执行：pip3.10 install --upgrade transformers bitsandbytes accelerate")
         except Exception as e:
-            raise RuntimeError(f"模型加载失败: {str(e)}")
+            raise RuntimeError(
+                f"模型加载失败: {str(e)}\n建议检查：1.transformers版本≥4.29.0 2.模型路径正确 3.bitsandbytes安装成功")
 
     def _init_mysql_connection(self) -> pymysql.connections.Connection:
         """初始化MySQL数据库连接"""
