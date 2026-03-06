@@ -1048,23 +1048,99 @@ def patch_fastmcp_uvicorn_config(settings: Settings) -> Dict[str, Any]:
     补丁：修改 FastMCP 内置的 Uvicorn 配置（核心修复）
     目的：关闭 proxy_headers，解决 421 错误；适配 SSE 校验规则
     """
-    # 1. 基础 Uvicorn 配置（关闭 proxy_headers）
+    # 基础 Uvicorn 配置（关闭 proxy_headers）
     uvicorn_config = {
-        "host": settings.host,
-        "port": settings.port,
+        "host": getattr(settings, "host", "127.0.0.1"),
+        "port": getattr(settings, "port", 11000),
         "proxy_headers": False,  # 关键：关闭代理头解析（解决 421）
-        "forwarded_allow_ips": None,
+        "forwarded_allow_ips": "",
         "http": "httptools",  # 强制 HTTP/1.1，兼容 SSE
         "ws": None,  # 禁用 WS，避免冲突
         "server_header": False,
+        "loop": "asyncio",
+        "limit_concurrency": None,  # 无并发限制
+        "timeout_keep_alive": 5,
     }
 
-    # 2. SSE 校验规则配置（关闭严格校验）
-    if hasattr(settings, "sse"):
-        settings.sse.strict_validation = False  # 解决 Request validation failed
-        settings.sse.allow_all_origins = True   # 放宽跨域
+    # SSE 相关配置（如果存在）
+    if hasattr(settings, "sse") and settings.sse:
+        try:
+            settings.sse.strict_validation = False  # 解决 Request validation failed
+            settings.sse.allow_all_origins = True  # 放宽跨域
+            settings.sse.allow_credentials = True
+            logger.info("SSE validation disabled, all origins allowed")
+        except Exception as e:
+            logger.warning(f"Failed to configure SSE settings: {e}")
 
     return uvicorn_config
+
+
+def patch_fastmcp_run_method(app):
+    """
+    猴子补丁：替换 FastMCP 的 run 方法，应用自定义配置
+    """
+    original_run = app.run
+
+    def patched_run(transport="stdio", **kwargs):
+        logger.info(f"Starting MCP server with {transport} mode (patched)...")
+
+        if transport in {"sse", "streamable-http"}:
+            try:
+                # 方法1：通过环境变量影响 Uvicorn 配置
+                import os
+                os.environ["UVICORN_PROXY_HEADERS"] = "0"
+
+                # 方法2：直接 patch Uvicorn 的 Config 类
+                from uvicorn.config import Config
+
+                original_init = Config.__init__
+
+                def patched_config_init(self, app, **config_kwargs):
+                    # 强制覆盖 proxy_headers 设置
+                    config_kwargs["proxy_headers"] = False
+                    config_kwargs["forwarded_allow_ips"] = ""
+                    logger.info(f"Uvicorn config patched: proxy_headers=False")
+                    original_init(self, app, **config_kwargs)
+
+                # 应用 patch
+                Config.__init__ = patched_config_init
+
+                # 方法3：如果 FastMCP 有配置字典，直接更新
+                if hasattr(app, "_uvicorn_kwargs"):
+                    app._uvicorn_kwargs.update({
+                        "proxy_headers": False,
+                        "forwarded_allow_ips": ""
+                    })
+                elif hasattr(app, "uvicorn_config"):
+                    app.uvicorn_config.update({
+                        "proxy_headers": False,
+                        "forwarded_allow_ips": ""
+                    })
+
+                # 方法4：通过 settings 对象配置
+                if hasattr(app, "settings"):
+                    # 设置 host/port
+                    if "host" in kwargs:
+                        app.settings.host = kwargs["host"]
+                    if "port" in kwargs:
+                        app.settings.port = kwargs["port"]
+
+                    # 应用补丁配置
+                    patched_config = patch_fastmcp_uvicorn_config(app.settings)
+                    for key, value in patched_config.items():
+                        if hasattr(app.settings, key):
+                            setattr(app.settings, key, value)
+
+                logger.info("SSE mode patches applied successfully")
+
+            except Exception as e:
+                logger.warning(f"Failed to apply patches: {e}, falling back to original method")
+
+        # 调用原始 run 方法
+        return original_run(transport=transport, **kwargs)
+
+    return patched_run
+
 
 def main():
     """Main entry point to run the MCP server（完全适配 FastMCP 封装）"""
@@ -1073,30 +1149,68 @@ def main():
         "--transport",
         type=str,
         default="stdio",
-        help="Specify the MCP server transport type as stdio or sse or streamable-http.",
+        choices=["stdio", "sse", "streamable-http"],
+        help="Specify the MCP server transport type",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=11000, help="Port to listen on")
+    parser.add_argument("--allow-all-hosts", action="store_true",
+                        help="Allow all hosts (disable host header validation)")
     args = parser.parse_args()
-    transport = args.transport
-    logger.info(f"Starting Dingodb MCP server with {transport} mode...")
 
-    # ========== 核心修复：仅修改配置，不手动启动 Uvicorn ==========
-    if transport in {"sse", "streamable-http"}:
-        # 1. 设置 host/port（遵循 FastMCP 配置规则）
-        app.settings.host = args.host
-        app.settings.port = args.port
+    # 获取 app 实例（假设已存在）
+    # app = your_fastmcp_app_instance
+    global app
 
-        # 2. 补丁：修改内置 Uvicorn 配置（关闭 proxy_headers）
-        # 找到 FastMCP 内置的 Uvicorn 配置入口（适配不同版本）
-        if hasattr(app, "_uvicorn_config"):
-            app._uvicorn_config = patch_fastmcp_uvicorn_config(app.settings)
-        elif hasattr(app, "server_config"):
-            app.server_config.update(patch_fastmcp_uvicorn_config(app.settings))
+    # ========== 核心修复 ==========
+    if args.transport in {"sse", "streamable-http"}:
+        # 设置 host/port 到 app 对象
+        app.host = args.host
+        app.port = args.port
 
-    # ========== 关键：使用 FastMCP 原生的 run 方法（避免 not callable） ==========
-    app.run(transport=transport)
+        # 应用补丁
+        app.run = patch_fastmcp_run_method(app)
+
+        # 如果允许所有主机，设置环境变量
+        if args.allow_all_hosts:
+            import os
+            os.environ["MCP_ALLOW_ALL_HOSTS"] = "1"
+
+            # 尝试直接 patch FastMCP 的主机验证逻辑
+            try:
+                from mcp.server import transport_security
+                original_validate = transport_security.validate_host
+                transport_security.validate_host = lambda host: True  # 总是通过验证
+                logger.info("Host header validation disabled")
+            except Exception as e:
+                logger.warning(f"Failed to disable host validation: {e}")
+
+    # ========== 启动服务器 ==========
+    logger.info(f"Starting Dingodb MCP server with {args.transport} mode...")
+
+    try:
+        app.run(transport=args.transport)
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        # 如果补丁失败，尝试直接使用 uvicorn
+        if args.transport in {"sse", "streamable-http"}:
+            logger.info("Attempting to start with direct uvicorn...")
+            import uvicorn
+            uvicorn.run(
+                app,
+                host=args.host,
+                port=args.port,
+                proxy_headers=False,
+                forwarded_allow_ips=""
+            )
+        else:
+            raise
 
 
 if __name__ == "__main__":
+    import os
+
+    os.environ["UVICORN_PROXY_HEADERS"] = "0"
+    os.environ["MCP_ALLOW_ALL_HOSTS"] = "1"
+
     main()
