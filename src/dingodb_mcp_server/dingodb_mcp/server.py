@@ -9,7 +9,7 @@ import ssl
 import sys
 import time
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from urllib import request, error
 
 import certifi
@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings
 from mcp.types import TextContent
 from mysql.connector import Error, connect
 from pydantic import BaseModel
@@ -1042,9 +1043,31 @@ def dingodb_text_2_sql(natural_language_query: str) -> str:
     #     })
     return sql
 
+def patch_fastmcp_uvicorn_config(settings: Settings) -> Dict[str, Any]:
+    """
+    补丁：修改 FastMCP 内置的 Uvicorn 配置（核心修复）
+    目的：关闭 proxy_headers，解决 421 错误；适配 SSE 校验规则
+    """
+    # 1. 基础 Uvicorn 配置（关闭 proxy_headers）
+    uvicorn_config = {
+        "host": settings.host,
+        "port": settings.port,
+        "proxy_headers": False,  # 关键：关闭代理头解析（解决 421）
+        "forwarded_allow_ips": None,
+        "http": "httptools",  # 强制 HTTP/1.1，兼容 SSE
+        "ws": None,  # 禁用 WS，避免冲突
+        "server_header": False,
+    }
+
+    # 2. SSE 校验规则配置（关闭严格校验）
+    if hasattr(settings, "sse"):
+        settings.sse.strict_validation = False  # 解决 Request validation failed
+        settings.sse.allow_all_origins = True   # 放宽跨域
+
+    return uvicorn_config
 
 def main():
-    """Main entry point to run the MCP server."""
+    """Main entry point to run the MCP server（完全适配 FastMCP 封装）"""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--transport",
@@ -1058,33 +1081,20 @@ def main():
     transport = args.transport
     logger.info(f"Starting Dingodb MCP server with {transport} mode...")
 
+    # ========== 核心修复：仅修改配置，不手动启动 Uvicorn ==========
     if transport in {"sse", "streamable-http"}:
-        # 1. 强制绑定指定的 host/port（覆盖 FastMCP 默认配置）
+        # 1. 设置 host/port（遵循 FastMCP 配置规则）
         app.settings.host = args.host
         app.settings.port = args.port
 
-        # 2. 禁用 SSE 严格校验（解决 Request validation failed）
-        if hasattr(app.settings, "sse_strict_validation"):
-            app.settings.sse_strict_validation = False
-        # 3. 允许所有 Origin（避免跨域触发的 421 错误）
-        if hasattr(app.settings, "sse_allow_all_origins"):
-            app.settings.sse_allow_all_origins = True
+        # 2. 补丁：修改内置 Uvicorn 配置（关闭 proxy_headers）
+        # 找到 FastMCP 内置的 Uvicorn 配置入口（适配不同版本）
+        if hasattr(app, "_uvicorn_config"):
+            app._uvicorn_config = patch_fastmcp_uvicorn_config(app.settings)
+        elif hasattr(app, "server_config"):
+            app.server_config.update(patch_fastmcp_uvicorn_config(app.settings))
 
-        # ========== 核心修复2：手动启动 Uvicorn（绕过 app.run() 的封装） ==========
-        # 目的：显式关闭 proxy_headers，解决 421 Misdirected Request
-        uvicorn.run(
-            app,
-            host=args.host,
-            port=args.port,
-            proxy_headers=False,  # 关键：关闭代理头解析（无反向代理必关）
-            forwarded_allow_ips=None,  # 清空代理 IP 列表
-            http="httptools",  # 强制 HTTP/1.1，兼容 SSE 长连接
-            ws=None,  # 禁用 WebSocket，避免和 SSE 冲突
-            server_header=False,  # 隐藏服务器头，减少校验干扰
-        )
-        return  # 手动启动后，不再执行 app.run()
-
-    # 非 SSE/HTTP 模式（如 stdio），使用原有逻辑
+    # ========== 关键：使用 FastMCP 原生的 run 方法（避免 not callable） ==========
     app.run(transport=transport)
 
 
