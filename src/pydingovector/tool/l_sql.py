@@ -33,7 +33,7 @@ class NL2SQLTool:
             database=config["database"],
         )
         # 初始化LLM客户端
-        self.tokenizer, self.generator = self._init_open_source_model()
+        # self.tokenizer, self.generator = self._init_open_source_model()
         # 初始化MySQL连接
         self.db_conn = self._init_mysql_connection()
 

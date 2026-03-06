@@ -13,6 +13,7 @@ from typing import Optional, List
 from urllib import request, error
 
 import certifi
+import uvicorn
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from mcp.server.auth.provider import AccessToken, TokenVerifier
@@ -143,7 +144,6 @@ if enable_auth:
 else:
     # Initialize server without authentication
     app = FastMCP("dingodb_mcp_server")
-
 
 @app.resource("dingo://sample/{table}", description="table sample")
 def table_sample(table: str) -> str:
@@ -1042,6 +1042,7 @@ def dingodb_text_2_sql(natural_language_query: str) -> str:
     #     })
     return sql
 
+
 def main():
     """Main entry point to run the MCP server."""
     parser = argparse.ArgumentParser()
@@ -1056,9 +1057,34 @@ def main():
     args = parser.parse_args()
     transport = args.transport
     logger.info(f"Starting Dingodb MCP server with {transport} mode...")
+
     if transport in {"sse", "streamable-http"}:
+        # 1. 强制绑定指定的 host/port（覆盖 FastMCP 默认配置）
         app.settings.host = args.host
         app.settings.port = args.port
+
+        # 2. 禁用 SSE 严格校验（解决 Request validation failed）
+        if hasattr(app.settings, "sse_strict_validation"):
+            app.settings.sse_strict_validation = False
+        # 3. 允许所有 Origin（避免跨域触发的 421 错误）
+        if hasattr(app.settings, "sse_allow_all_origins"):
+            app.settings.sse_allow_all_origins = True
+
+        # ========== 核心修复2：手动启动 Uvicorn（绕过 app.run() 的封装） ==========
+        # 目的：显式关闭 proxy_headers，解决 421 Misdirected Request
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            proxy_headers=False,  # 关键：关闭代理头解析（无反向代理必关）
+            forwarded_allow_ips=None,  # 清空代理 IP 列表
+            http="httptools",  # 强制 HTTP/1.1，兼容 SSE 长连接
+            ws=None,  # 禁用 WebSocket，避免和 SSE 冲突
+            server_header=False,  # 隐藏服务器头，减少校验干扰
+        )
+        return  # 手动启动后，不再执行 app.run()
+
+    # 非 SSE/HTTP 模式（如 stdio），使用原有逻辑
     app.run(transport=transport)
 
 
