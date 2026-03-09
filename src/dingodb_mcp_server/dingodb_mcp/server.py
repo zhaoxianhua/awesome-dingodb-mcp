@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import os
@@ -8,6 +9,7 @@ import re
 import ssl
 import sys
 import time
+from asyncio import Server
 from pathlib import Path
 from typing import Optional, List, Dict
 from urllib import request, error
@@ -20,9 +22,12 @@ from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings
-from mcp.types import TextContent
+from mcp.server.sse import SseServerTransport
+from mcp.types import TextContent, Request
 from mysql.connector import Error, connect
 from pydantic import BaseModel
+from starlette.applications import Starlette
+from starlette.routing import Route, Mount
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
@@ -47,7 +52,6 @@ logger.info(
     f" ENABLE_MEMORY: {ENABLE_MEMORY},EMBEDDING_MODEL_NAME: {EMBEDDING_MODEL_NAME}, EMBEDDING_MODEL_PROVIDER: {EMBEDDING_MODEL_PROVIDER}"
 )
 
-
 class DingoConnection(BaseModel):
     host: str
     port: int
@@ -61,53 +65,6 @@ class DingodbMemoryItem(BaseModel):
     content: str
     meta: dict
     embedding: List[float]
-
-
-# Check if authentication should be enabled based on ALLOWED_TOKENS
-# This check happens after load_dotenv() so it can read from .env file
-allowed_tokens_str = os.getenv("ALLOWED_TOKENS", "")
-enable_auth = bool(allowed_tokens_str.strip())
-
-
-class SimpleTokenVerifier(TokenVerifier):
-    """
-    Simple token verifier that validates tokens against a list of allowed tokens.
-    Configure allowed tokens via ALLOWED_TOKENS environment variable (comma-separated).
-    """
-
-    def __init__(self):
-        # Get allowed tokens from environment variable
-        allowed_tokens_str = os.getenv("ALLOWED_TOKENS", "")
-        self.allowed_tokens = set(
-            token.strip() for token in allowed_tokens_str.split(",") if token.strip()
-        )
-
-        logger.info(f"Token verifier initialized with {len(self.allowed_tokens)} allowed tokens")
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """
-        Verify a bearer token.
-
-        Args:
-            token: The token to verify
-
-        Returns:
-            AccessToken if valid, None if invalid
-        """
-        # Check if token is empty
-        if not token or not token.strip():
-            logger.debug("Empty token provided")
-            return None
-
-        # Check if token is in allowed list
-        if token not in self.allowed_tokens:
-            logger.warning(f"Invalid token provided: {token[:10]}...")
-            return None
-
-        logger.debug(f"Valid token accepted: {token[:10]}...")
-        return AccessToken(
-            token=token, client_id="authenticated_client", scopes=["read", "write"], expires_at=None
-        )
 
 
 def get_db_config():
@@ -128,23 +85,8 @@ def get_db_config():
     return config
 
 db_conn_info = get_db_config()
-
-if enable_auth:
-    logger.info("Authentication enabled - ALLOWED_TOKENS configured")
-    # Initialize server with token verifier and minimal auth settings
-    # FastMCP requires auth settings when using token_verifier
-    app = FastMCP(
-        "dingodb_mcp_server",
-        token_verifier=SimpleTokenVerifier(),
-        auth=AuthSettings(
-            # Because the TokenVerifier is being used, the following two URLs only need to comply with the URL rules.
-            issuer_url="http://localhost:8000",
-            resource_server_url="http://localhost:8000",
-        ),
-    )
-else:
-    # Initialize server without authentication
-    app = FastMCP("dingodb_mcp_server")
+# Initialize server without authentication
+app = FastMCP("dingodb_mcp_server")
 
 @app.resource("dingo://sample/{table}", description="table sample")
 def table_sample(table: str) -> str:
@@ -392,10 +334,7 @@ def get_dingodb_doc_content(doc_url: str, doc_id: str) -> dict:
         return {"result": "No results were found"}
 
 
-@app.tool(
-    # name="dingodb_text_search",
-    # description="DingoDB全文检索工具，支持指定索引名检索表中指定列包含关键词的数据",
-   )
+@app.tool()
 def dingodb_text_search(
     table_name: str,
     index_name: str,
@@ -1043,174 +982,6 @@ def dingodb_text_2_sql(natural_language_query: str) -> str:
     #     })
     return sql
 
-def patch_fastmcp_uvicorn_config(settings: Settings) -> Dict[str, Any]:
-    """
-    补丁：修改 FastMCP 内置的 Uvicorn 配置（核心修复）
-    目的：关闭 proxy_headers，解决 421 错误；适配 SSE 校验规则
-    """
-    # 基础 Uvicorn 配置（关闭 proxy_headers）
-    uvicorn_config = {
-        "host": getattr(settings, "host", "127.0.0.1"),
-        "port": getattr(settings, "port", 11000),
-        "proxy_headers": False,  # 关键：关闭代理头解析（解决 421）
-        "forwarded_allow_ips": "",
-        "http": "httptools",  # 强制 HTTP/1.1，兼容 SSE
-        "ws": None,  # 禁用 WS，避免冲突
-        "server_header": False,
-        "loop": "asyncio",
-        "limit_concurrency": None,  # 无并发限制
-        "timeout_keep_alive": 5,
-    }
-
-    # SSE 相关配置（如果存在）
-    if hasattr(settings, "sse") and settings.sse:
-        try:
-            settings.sse.strict_validation = False  # 解决 Request validation failed
-            settings.sse.allow_all_origins = True  # 放宽跨域
-            settings.sse.allow_credentials = True
-            logger.info("SSE validation disabled, all origins allowed")
-        except Exception as e:
-            logger.warning(f"Failed to configure SSE settings: {e}")
-
-    return uvicorn_config
-
-
-def patch_fastmcp_run_method(app):
-    """
-    猴子补丁：替换 FastMCP 的 run 方法，应用自定义配置
-    """
-    original_run = app.run
-
-    def patched_run(transport="stdio", **kwargs):
-        logger.info(f"Starting MCP server with {transport} mode (patched)...")
-
-        if transport in {"sse", "streamable-http"}:
-            try:
-                # 方法1：通过环境变量影响 Uvicorn 配置
-                import os
-                os.environ["UVICORN_PROXY_HEADERS"] = "0"
-
-                # 方法2：直接 patch Uvicorn 的 Config 类
-                from uvicorn.config import Config
-
-                original_init = Config.__init__
-
-                def patched_config_init(self, app, **config_kwargs):
-                    # 强制覆盖 proxy_headers 设置
-                    config_kwargs["proxy_headers"] = False
-                    config_kwargs["forwarded_allow_ips"] = ""
-                    logger.info(f"Uvicorn config patched: proxy_headers=False")
-                    original_init(self, app, **config_kwargs)
-
-                # 应用 patch
-                Config.__init__ = patched_config_init
-
-                # 方法3：如果 FastMCP 有配置字典，直接更新
-                if hasattr(app, "_uvicorn_kwargs"):
-                    app._uvicorn_kwargs.update({
-                        "proxy_headers": False,
-                        "forwarded_allow_ips": ""
-                    })
-                elif hasattr(app, "uvicorn_config"):
-                    app.uvicorn_config.update({
-                        "proxy_headers": False,
-                        "forwarded_allow_ips": ""
-                    })
-
-                # 方法4：通过 settings 对象配置
-                if hasattr(app, "settings"):
-                    # 设置 host/port
-                    if "host" in kwargs:
-                        app.settings.host = kwargs["host"]
-                    if "port" in kwargs:
-                        app.settings.port = kwargs["port"]
-
-                    # 应用补丁配置
-                    patched_config = patch_fastmcp_uvicorn_config(app.settings)
-                    for key, value in patched_config.items():
-                        if hasattr(app.settings, key):
-                            setattr(app.settings, key, value)
-
-                logger.info("SSE mode patches applied successfully")
-
-            except Exception as e:
-                logger.warning(f"Failed to apply patches: {e}, falling back to original method")
-
-        # 调用原始 run 方法
-        return original_run(transport=transport, **kwargs)
-
-    return patched_run
-
-
-def main():
-    """Main entry point to run the MCP server（完全适配 FastMCP 封装）"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--transport",
-        type=str,
-        default="stdio",
-        choices=["stdio", "sse", "streamable-http"],
-        help="Specify the MCP server transport type",
-    )
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=11000, help="Port to listen on")
-    parser.add_argument("--allow-all-hosts", action="store_true",
-                        help="Allow all hosts (disable host header validation)")
-    args = parser.parse_args()
-
-    # 获取 app 实例（假设已存在）
-    # app = your_fastmcp_app_instance
-    global app
-
-    # ========== 核心修复 ==========
-    if args.transport in {"sse", "streamable-http"}:
-        # 设置 host/port 到 app 对象
-        app.host = args.host
-        app.port = args.port
-
-        # 应用补丁
-        app.run = patch_fastmcp_run_method(app)
-
-        # 如果允许所有主机，设置环境变量
-        if args.allow_all_hosts:
-            import os
-            os.environ["MCP_ALLOW_ALL_HOSTS"] = "1"
-
-            # 尝试直接 patch FastMCP 的主机验证逻辑
-            try:
-                from mcp.server import transport_security
-                original_validate = transport_security.validate_host
-                transport_security.validate_host = lambda host: True  # 总是通过验证
-                logger.info("Host header validation disabled")
-            except Exception as e:
-                logger.warning(f"Failed to disable host validation: {e}")
-
-    # ========== 启动服务器 ==========
-    logger.info(f"Starting Dingodb MCP server with {args.transport} mode...")
-
-    try:
-        app.run(transport=args.transport)
-    except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-        # 如果补丁失败，尝试直接使用 uvicorn
-        if args.transport in {"sse", "streamable-http"}:
-            logger.info("Attempting to start with direct uvicorn...")
-            import uvicorn
-            uvicorn.run(
-                app,
-                host=args.host,
-                port=args.port,
-                proxy_headers=False,
-                forwarded_allow_ips=""
-            )
-        else:
-            raise
-
-
 if __name__ == "__main__":
-    import os
+    app.run(transport="sse")
 
-    os.environ["UVICORN_PROXY_HEADERS"] = "0"
-    os.environ["MCP_ALLOW_ALL_HOSTS"] = "1"
-
-    main()
