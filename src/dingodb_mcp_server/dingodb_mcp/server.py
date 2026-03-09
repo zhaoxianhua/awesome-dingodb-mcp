@@ -983,5 +983,15 @@ def dingodb_text_2_sql(natural_language_query: str) -> str:
     return sql
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8001, help="SSE 服务端口")  # 默认值改为 8001
+    parser.add_argument("--host", default="0.0.0.0", help="绑定主机")
+    args = parser.parse_args()
+
+    # ========== 关联参数到 FastMCP 配置 ==========
+    if args.port:
+        app.settings.port = args.port
+    if args.host:
+        app.settings.host = args.host
     app.run(transport="sse")
 
