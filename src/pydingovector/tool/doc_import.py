@@ -6,7 +6,7 @@ from langchain_text_splitters import MarkdownTextSplitter
 from mysql.connector import connect, Error
 from sentence_transformers import SentenceTransformer
 
-logger = logging.getLogger("polardb-mysql-mcp-server")
+logger = logging.getLogger("dingodb-mysql-mcp-server")
 DEFAULT_TABLE_NAME = "default_knowledge_base"
 
 
@@ -144,7 +144,7 @@ class DocImport:
         logger.info(f"success import {entry_count} entries with {file_count} files to table({table_name})")
         return f"success import {entry_count} entries with {file_count} files"
     
-    def query_knowledge(self, text: str,count=5, table=''):
+    def query_knowledge(self, text: str, count=5, table=''):
         text = self.text_deal(text)
         vec = self.text_to_vect(text)
         if table=='':

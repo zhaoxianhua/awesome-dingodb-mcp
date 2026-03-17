@@ -86,10 +86,15 @@ def get_db_config():
 
 db_conn_info = get_db_config()
 # Initialize server without authentication
-app = FastMCP("dingodb_mcp_server")
+app = FastMCP("dingodb_mcp_server", json_response=True, stateless_http=True, )
 
-@app.resource("dingo://sample/{table}", description="table sample")
+@app.tool()
 def table_sample(table: str) -> str:
+    """
+        Look at the sample data for the table.
+        Args:
+            table: Name of the table to search.
+    """
     valid_table_pattern = re.compile(r'^[a-zA-Z0-9_.]+$')
     if not valid_table_pattern.match(table):
         logger.error(f"Invalid table name: {table} (contains illegal characters)")
@@ -194,12 +199,80 @@ def get_all_server_nodes():
     Get all server nodes from dingo.
     You need to be sys tenant to get all server nodes.
     """
-    tenant = json.loads(get_current_tenant())["data"][0][0]
-    if tenant != "sys":
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
         raise ValueError("Only sys tenant can get all server nodes")
 
     logger.info("Calling tool: get_all_server_nodes")
-    sql_query = "select * from dingo.DBA_DINGODB_SERVERS"
+    sql_query = "show servers"
+    try:
+        return execute_sql(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+@app.tool()
+def get_all_executor():
+    """
+    See what compute nodes are in the current cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_all_executor")
+    sql_query = "show executors"
+    try:
+        return execute_sql(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+@app.tool()
+def get_all_store():
+    """
+    See what storage nodes are in the current cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_all_store")
+    sql_query = "show store_nodes"
+    try:
+        return execute_sql(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+@app.tool()
+def get_all_coordinate():
+    """
+    See which coordinator nodes are present in the current cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_all_coordinate")
+    sql_query = "show coordinator_nodes"
+    try:
+        return execute_sql(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+@app.tool()
+def get_resource_capacity() -> str:
+    """
+    Get resource capacity from dingo.
+    You need to be sys tenant to get resource capacity.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get resource capacity")
+    logger.info("Calling tool: get_resource_capacity")
+    sql_query = "show capacity"
     try:
         return execute_sql(sql_query)
     except Error as e:
@@ -208,16 +281,16 @@ def get_all_server_nodes():
 
 
 @app.tool()
-def get_resource_capacity():
+def get_region_count():
     """
-    Get resource capacity from dingo.
-    You need to be sys tenant to get resource capacity.
+    Check the number of regions in the cluster.
     """
-    tenant = json.loads(get_current_tenant())["data"][0][0]
-    if tenant != "sys":
-        raise ValueError("Only sys tenant can get resource capacity")
-    logger.info("Calling tool: get_resource_capacity")
-    sql_query = "select * from dingo.GV$DINGODB_SERVERS"
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_region_count")
+    sql_query = "show regions_count"
     try:
         return execute_sql(sql_query)
     except Error as e:
@@ -225,6 +298,43 @@ def get_resource_capacity():
         return f"Error executing query: {str(e)}"
 
 
+@app.tool()
+def get_store_job_list():
+    """
+    View the current cluster storage-side job information.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_store_job_list")
+    sql_query = "show store_jobs"
+    try:
+        return execute_sql(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+@app.tool()
+def get_gc_safe_point():
+    """
+    View the current cluster GC Safepoint.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_gc_safe_point")
+    sql_query = "show gc_safepoint"
+    try:
+        return execute_sql(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+# todo
 @app.tool()
 def search_dingodb_document(keyword: str) -> str:
     """
@@ -345,7 +455,7 @@ def dingodb_text_search(
     limit: int = 5
 ) -> str:
     """
-    Search for documents using full text search in a Dingodb table.
+    Search for records using full text search in a Dingodb table.
 
     Args:
         table_name: Name of the table to search.
@@ -578,7 +688,7 @@ def dingodb_hybrid_search(
     logger.info(f"Calling tool: dingodb_hybrid_search with filter: {filter_expr}, topk: {topk}")
     return execute_sql(sql)
 
-
+# done
 @app.tool()
 def query_running_tasks() -> str:
     """
@@ -588,7 +698,7 @@ def query_running_tasks() -> str:
     sql = "select * from INFORMATION_SCHEMA.dingo_sql_job"
     return execute_sql(sql)
 
-
+# done
 @app.tool()
 def query_time_over_5_minutes_tasks() -> str:
     """
@@ -924,6 +1034,7 @@ def query_time_over_5_minutes_tasks() -> str:
 #     app.add_tool(dingo_memory_update)
 #
 
+# jbjkjh
 @app.tool()
 def dingodb_import_doc(dir_path: str,
                        table_name: str = "default_knowledge_base") -> list[TextContent]:
@@ -945,7 +1056,7 @@ def dingodb_search_doc(text: str,
                        table_name: str = "default_knowledge_base",
                        count: int = 5) -> list[TextContent]:
     """
-    从DingoDB的知识库中搜索相关的知识.
+    从DingoDB导入的知识库中搜索相关的知识文档.
 
     Args:
         text: 要搜索的内容.
@@ -986,6 +1097,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8001, help="SSE 服务端口")  # 默认值改为 8001
     parser.add_argument("--host", default="0.0.0.0", help="绑定主机")
+    parser.add_argument("--transport", default="sse", help="部署方式")  # sse/streamable-http
     args = parser.parse_args()
 
     # ========== 关联参数到 FastMCP 配置 ==========
@@ -993,5 +1105,5 @@ if __name__ == "__main__":
         app.settings.port = args.port
     if args.host:
         app.settings.host = args.host
-    app.run(transport="sse")
+    app.run(transport = f"{args.transport}")
 
