@@ -1,7 +1,7 @@
 from pydingovector.tool.doc_import import DocImport
 from .server import execute_sql, list_tables, table_sample, get_current_time, dingodb_text_search, \
     dingodb_vector_search, dingodb_hybrid_search, query_running_tasks, query_time_over_5_minutes_tasks, get_db_config, \
-    dingodb_text_2_sql, get_resource_capacity, get_all_server_nodes
+    dingodb_text_2_sql, get_resource_capacity, get_all_server_nodes, dingo_memory_insert
 
 
 def test_execute_sql():
@@ -39,6 +39,10 @@ def test_oceabase_vector_search():
 
 def test_dingodb_hybrid_search():
     res = dingodb_hybrid_search("t2",[0.8894774317741394, 0.7277960181236267, 0.692345142364502, 0.47235092520713806, 0.8568729162216187, 0.6647433042526245, 0.3333759307861328, 0.5181455016136169],"feature", ["rating = 5"])
+    print(res)
+
+def test_dingo_memory_insert():
+    res = dingo_memory_insert("我喜欢足球和篮球，但是不喜欢游泳。另外我在上海工作，使用Python开发。", {"type":"preference", "category":"sports/food/work/tech", "subcategory":"team_sports/beverages"})
     print(res)
 
 def test_query_running_tasks():

@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Optional, Union
 
-from sqlalchemy import Table, Index
+from sqlalchemy import Table, Index, insert
 
 from pydingovector.client.dingo_client import DingoClient
 from pydingovector.schema.vector_index import VectorIndex
@@ -48,3 +48,35 @@ class DingoVecClient(DingoClient):
                 else:
                     idx = Index(index_name, *columns, **kw)
                     idx.create(self.engine, checkfirst=True)
+
+    def insert(
+        self,
+        table_name: str,
+        data: Union[dict, list[dict]],
+        partition_name: Optional[str] = "",
+    ):
+        """Insert data into table.
+
+        Args:
+            table_name (string): table name
+            data (Union[Dict, List[Dict]]): data that will be inserted
+            partition_name (Optional[str]): limit the query to certain partition
+        """
+        if isinstance(data, dict):
+            data = [data]
+
+        if len(data) == 0:
+            return
+
+        table = Table(table_name, self.metadata_obj, autoload_with=self.engine)
+
+        with self.engine.connect() as conn:
+            with conn.begin():
+                if partition_name is None or partition_name == "":
+                    conn.execute(insert(table).values(data))
+                else:
+                    conn.execute(
+                        insert(table)
+                        .with_hint(f"PARTITION({partition_name})")
+                        .values(data)
+                    )
