@@ -42,7 +42,10 @@ def test_dingodb_hybrid_search():
     print(res)
 
 def test_dingo_memory_insert():
-    res = dingo_memory_insert("我喜欢足球和篮球，但是不喜欢游泳。另外我在上海工作，使用Python开发。", {"type":"preference", "category":"sports/food/work/tech", "subcategory":"team_sports/beverages"})
+    # res = dingo_memory_insert("我喜欢足球和篮球，但是不喜欢游泳。另外我在上海工作，使用Python开发。", {"type":"preference", "category":"sports/food/work/tech", "subcategory":"team_sports/beverages"})
+    # print(res)
+    res = dingo_memory_insert("我喜欢足球和篮球，但是不喜欢游泳。另外我在上海工作，使用Python开发。",
+                            None)
     print(res)
 
 def test_query_running_tasks():

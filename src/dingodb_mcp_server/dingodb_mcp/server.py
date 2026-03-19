@@ -21,9 +21,6 @@ from mcp.types import TextContent
 from mysql.connector import Error, connect
 from pydantic import BaseModel
 
-from pydingovector.schema.vec_dist_func import l2_distance
-from pydingovector.schema.vector import VECTOR
-
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
@@ -137,6 +134,10 @@ def list_tables() -> str:
 def execute_sql(sql: str) -> str:
     """Execute an SQL on the Dingodb server."""
     logger.info(f"Calling tool: execute_sql  with arguments: {sql}")
+    return execute_sql_help(sql)
+
+
+def execute_sql_help(sql: str) -> str:
     result = {"sql": sql, "success": False, "rows": 0, "columns": None, "data": None, "error": None}
     try:
         with connect(**get_db_config()) as conn:
@@ -171,7 +172,7 @@ def get_current_time() -> str:
     logger.info("Calling tool: get_current_time")
     sql_query = "SELECT NOW()"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error getting database time: {e}")
         # Fallback to system time if database query fails
@@ -189,7 +190,7 @@ def get_current_tenant() -> str:
     logger.info("Calling tool: get_current_tenant")
     sql_query = "show tenants"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -208,7 +209,7 @@ def get_all_server_nodes():
     logger.info("Calling tool: get_all_server_nodes")
     sql_query = "show servers"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -226,7 +227,7 @@ def get_all_executor():
     logger.info("Calling tool: get_all_executor")
     sql_query = "show executors"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -244,7 +245,7 @@ def get_all_store():
     logger.info("Calling tool: get_all_store")
     sql_query = "show store_nodes"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -262,7 +263,7 @@ def get_all_coordinate():
     logger.info("Calling tool: get_all_coordinate")
     sql_query = "show coordinator_nodes"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -280,7 +281,7 @@ def get_resource_capacity() -> str:
     logger.info("Calling tool: get_resource_capacity")
     sql_query = "show capacity"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -298,7 +299,7 @@ def get_region_count():
     logger.info("Calling tool: get_region_count")
     sql_query = "show regions_count"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -316,7 +317,7 @@ def get_store_job_list():
     logger.info("Calling tool: get_store_job_list")
     sql_query = "show store_jobs"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -334,7 +335,7 @@ def get_gc_safe_point():
     logger.info("Calling tool: get_gc_safe_point")
     sql_query = "show gc_safepoint"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -543,7 +544,7 @@ def dingodb_text_search(
     if len(where_clause) > 0:
         sql += " WHERE " + where_clause
     logger.info(f"Calling tool: dingodb_text_search with generated SQL: {sql}")
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 @app.tool()
@@ -607,7 +608,7 @@ def dingodb_vector_search(
     # Dingodb向量检索核心语法（余弦相似度降序，取topk）
     sql = f"""SELECT {output_cols} FROM vector({table_escaped}, {vec_col_escaped}, array{vector_str},{topk})""".strip()  # ASC：余弦相似度值越小，相似度越高
     logger.info(f"Calling tool: Dingodb_vector_search with vector: {vector_str}, topk: {topk}")
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 @app.tool()
@@ -691,7 +692,7 @@ def dingodb_hybrid_search(
 
     # 4. 调用execute_sql执行混合检索
     logger.info(f"Calling tool: dingodb_hybrid_search with filter: {filter_expr}, topk: {topk}")
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 # done
@@ -702,7 +703,7 @@ def query_running_tasks() -> str:
     """
     logger.info("Calling tool: dingodb_running_tasks")
     sql = "select * from INFORMATION_SCHEMA.dingo_sql_job"
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 # done
@@ -713,12 +714,12 @@ def query_time_over_5_minutes_tasks() -> str:
     """
     logger.info("Calling tool: dingodb_time_over_5_minutes_tasks")
     sql = "select * from INFORMATION_SCHEMA.processlist where command='query' and time_cost>0"
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 if ENABLE_MEMORY:
     from pydingovector.client.dingo_vec_client import DingoVecClient
-    from sqlalchemy import Column, Integer, JSON, String, text
+    from sqlalchemy import text
 
     class DingodbMemory:
         def __init__(self):
@@ -726,7 +727,6 @@ if ENABLE_MEMORY:
             self.embedding_dimension = len(self.embedding_client.embed_query("test"))
             logger.info(f"embedding_dimension: {self.embedding_dimension}")
 
-            self.client = self._get_client()
             self._init_dingodb_vector()
 
         def gen_embedding(self, text: str) -> List[float]:
@@ -754,19 +754,17 @@ if ENABLE_MEMORY:
             """
             Initialize the OBVector.
             """
-            client = self.client
-            if not client.check_table_exists(TABLE_NAME_MEMORY):
-                create_table_sql = f"""
-                         create table if not exists {TABLE_NAME_MEMORY}(
-                         mem_id bigint auto_increment,
-                         content varchar(8000),
-                         meta    varchar(10000),
-                         embedding float array not null,
-                         index embedding_index vector(mem_id, embedding) parameters(type=hnsw, metricType=L2, dimension={self.embedding_dimension}, efConstruction=40, nlinks=32),
-                         primary key(mem_id)
-                         )comment 'columnar=1';
-                     """
-                execute_sql(create_table_sql)
+            create_table_sql = f"""
+                     create table if not exists {TABLE_NAME_MEMORY}(
+                     mem_id bigint auto_increment,
+                     content varchar(8000),
+                     meta    varchar(10000),
+                     embedding float array not null,
+                     index embedding_index vector(mem_id, embedding) parameters(type=hnsw, metricType=L2, dimension={self.embedding_dimension}, efConstruction=40, nlinks=32),
+                     primary key(mem_id)
+                     )comment 'columnar=1';
+                 """
+            execute_sql_help(create_table_sql)
 
 
 
@@ -835,18 +833,18 @@ if ENABLE_MEMORY:
         🔥 CATEGORY ANALYSIS RULE: Find ALL related memories by category for smart merging!
         """
 
-        client = dingo_memory.client
-        res = client.ann_search(
-            TABLE_NAME_MEMORY,
-            vec_data=dingo_memory.gen_embedding(query),
-            vec_column_name="embedding",
-            distance_func=l2_distance,
-            topk=topk,
-            output_column_names=["mem_id", "content"],
-        )
+        # client = dingo_memory.client
+        # res = client.ann_search(
+        #     TABLE_NAME_MEMORY,
+        #     vec_data=dingo_memory.gen_embedding(query),
+        #     vec_column_name="embedding",
+        #     distance_func=l2_distance,
+        #     topk=topk,
+        #     output_column_names=["mem_id", "content"],
+        # )
         results = []
-        for row in res.fetchall():
-            results.append({"mem_id": row[0], "content": row[1]})
+        # for row in res.fetchall():
+        #     results.append({"mem_id": row[0], "content": row[1]})
         return json.dumps(results)
 
     def dingo_memory_insert(content: str, meta: dict):
@@ -927,15 +925,11 @@ if ENABLE_MEMORY:
 
         🎯 GOLDEN RULE: Same category = UPDATE existing! Different category = CREATE separate!
         """
-
-        client = dingo_memory.client
-        client.insert(
-            TABLE_NAME_MEMORY,
-            DingodbMemoryItem(
-                content=content, meta="", embedding=dingo_memory.gen_embedding(content)
-            ).model_dump(),
-        )
-        return "Inserted successfully"
+        json_str = json.dumps(meta, ensure_ascii=False, indent=4)
+        insert_sql = f"""
+                            insert into {TABLE_NAME_MEMORY} (content, meta, embedding) values ('{content}', '{json_str}', array{dingo_memory.gen_embedding(content)})
+                        """
+        return execute_sql_help(insert_sql)
 
     def dingo_memory_delete(mem_id: int):
         """
@@ -960,9 +954,10 @@ if ENABLE_MEMORY:
         🔒 SAFETY RULE: Only delete when explicitly requested by user!
         """
 
-        client = dingo_memory.client
-        client.delete(table_name=TABLE_NAME_MEMORY, ids=mem_id)
-        return "Deleted successfully"
+        delete_sql = f"""
+                           delete from  {TABLE_NAME_MEMORY} where mem_id = {mem_id}
+                       """
+        return execute_sql_help(delete_sql)
 
     def dingo_memory_update(mem_id: int, content: str, meta: dict):
         """
@@ -994,20 +989,11 @@ if ENABLE_MEMORY:
         🔥 CONSISTENCY RULE: Maintain English storage format for all updates!
         """
 
-        client = dingo_memory.client
-        client.update(
-            table_name=TABLE_NAME_MEMORY,
-            values_clause=[
-                DingodbMemoryItem(
-                    mem_id=mem_id,
-                    content=content,
-                    meta=meta,
-                    embedding=dingo_memory.gen_embedding(content),
-                ).model_dump()
-            ],
-            where_clause=[text(f"mem_id = {mem_id}")],
-        )
-        return "Updated successfully"
+        json_str = json.dumps(meta, ensure_ascii=False, indent=4)
+        update_sql = f"""
+                               update {TABLE_NAME_MEMORY} set content = '{content}', meta = '{json_str}', embedding = array{dingo_memory.gen_embedding(content)} where mem_id = {mem_id}
+                           """
+        return execute_sql_help(update_sql)
 
 
 
