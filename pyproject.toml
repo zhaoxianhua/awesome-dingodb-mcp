@@ -1,0 +1,36 @@
+[project]
+name = "mcp-dingodb"
+version = "0.1.0"
+description = "A Model Context Protocol (MCP) server that enables secure interaction with OceanBase databases. This server allows AI assistants to list tables, read data, and execute SQL queries through a controlled interface, making database exploration and analysis safer and more structured."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "fastmcp>=2.5.1",
+    "mysql-connector-python>=9.1.0",
+    "python-dotenv",
+    "beautifulsoup4>=4.13.3",
+    "certifi>=2025.4.26",
+    "requests"
+]
+packages = ["dingodb_mcp_server", "pydingovector"]
+
+[[project.authors]]
+name = "OceanBase"
+email = "open_contact@oceanbase.com"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "src/dingodb_mcp/**/*.py",
+    "src/pydingovector/**/*.py"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dingodb_mcp"]
+
+[project.scripts]
+ocp_mcp_server = "dingodb_mcp:main"
