@@ -1,24 +1,31 @@
 from __future__ import annotations
+
+import argparse
+import json
 import logging
 import os
 import re
+import ssl
+import sys
 import time
+from pathlib import Path
 from typing import Optional, List
 from urllib import request, error
-import json
-import argparse
-from dotenv import load_dotenv
-from mcp import Tool
-from mcp.server.fastmcp import FastMCP
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
-from mysql.connector import Error, connect
-from bs4 import BeautifulSoup
+
 import certifi
-import ssl
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import TextContent
+from mysql.connector import Error, connect
 from pydantic import BaseModel
-from pyobvector import ObVecClient, MatchAgainst, l2_distance, inner_product, cosine_distance
-from sqlalchemy import text
+
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+
+from pydingovector.tool.doc_import import DocImport
+from pydingovector.tool.l_sql import NL2SQLTool
 
 # Configure logging
 logging.basicConfig(
@@ -26,13 +33,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dingodb_mcp_server")
 
-load_dotenv()
+load_dotenv(".env")
 
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-small-en-v1.5")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "/Users/zhaoli/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 EMBEDDING_MODEL_PROVIDER = os.getenv("EMBEDDING_MODEL_PROVIDER", "huggingface")
-ENABLE_MEMORY = int(os.getenv("ENABLE_MEMORY", 0))
-
-TABLE_NAME_MEMORY = os.getenv("TABLE_NAME_MEMORY", "dingo_mcp_memory")
+ENABLE_MEMORY = int(os.getenv("ENABLE_MEMORY", 1))
+TABLE_NAME_MEMORY = os.getenv("TABLE_NAME_MEMORY", "patient")
 
 logger.info(
     f" ENABLE_MEMORY: {ENABLE_MEMORY},EMBEDDING_MODEL_NAME: {EMBEDDING_MODEL_NAME}, EMBEDDING_MODEL_PROVIDER: {EMBEDDING_MODEL_PROVIDER}"
@@ -47,100 +53,54 @@ class DingoConnection(BaseModel):
     database: str
 
 
-class DingoMemoryItem(BaseModel):
-    mem_id: int = None
+class DingodbMemoryItem(BaseModel):
+    id: int = None
     content: str
-    meta: dict
+    meta: str
     embedding: List[float]
 
 
-# Check if authentication should be enabled based on ALLOWED_TOKENS
-# This check happens after load_dotenv() so it can read from .env file
-allowed_tokens_str = os.getenv("ALLOWED_TOKENS", "")
-enable_auth = bool(allowed_tokens_str.strip())
+def get_db_config():
+    """Get database configuration from environment variables."""
+    config = {
+        "host": os.getenv("DINGODB_HOST", "172.30.14.123"),
+        "port": int(os.getenv("DINGODB_PORT", "3307")),
+        "user": os.getenv("DINGODB_USER", "root"),
+        "password": os.getenv("DINGODB_PASSWORD", "123123"),
+        "database": os.getenv("DINGODB_DATABASE", "dingo"),
+        "charset": "utf8mb4"
+    }
+
+    if not all([config["user"], config["password"], config["database"]]):
+        logger.error("Missing required database configuration. Please check environment variables:")
+        logger.error("DINGODB_USER, DINGODB_PASSWORD, and DINGODB_DATABASE are required")
+        raise ValueError("Missing required database configuration")
+
+    return config
 
 
-class SimpleTokenVerifier(TokenVerifier):
-    """
-    Simple token verifier that validates tokens against a list of allowed tokens.
-    Configure allowed tokens via ALLOWED_TOKENS environment variable (comma-separated).
-    """
-
-    def __init__(self):
-        # Get allowed tokens from environment variable
-        allowed_tokens_str = os.getenv("ALLOWED_TOKENS", "")
-        self.allowed_tokens = set(
-            token.strip() for token in allowed_tokens_str.split(",") if token.strip()
-        )
-
-        logger.info(f"Token verifier initialized with {len(self.allowed_tokens)} allowed tokens")
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """
-        Verify a bearer token.
-
-        Args:
-            token: The token to verify
-
-        Returns:
-            AccessToken if valid, None if invalid
-        """
-        # Check if token is empty
-        if not token or not token.strip():
-            logger.debug("Empty token provided")
-            return None
-
-        # Check if token is in allowed list
-        if token not in self.allowed_tokens:
-            logger.warning(f"Invalid token provided: {token[:10]}...")
-            return None
-
-        logger.debug(f"Valid token accepted: {token[:10]}...")
-        return AccessToken(
-            token=token, client_id="authenticated_client", scopes=["read", "write"], expires_at=None
-        )
+db_conn_info = get_db_config()
+# Initialize server without authentication
+app = FastMCP("dingodb_mcp_server", json_response=True, stateless_http=True, transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["localhost:*", "127.0.0.1:*", "10.230.109.45:*"],
+        allowed_origins=["http://localhost:*", "http://10.230.109.45:*"],
+    ))
 
 
-db_conn_info = DingoConnection(
-    # host=os.getenv("DINGODB_HOST", "10.230.109.45"),
-    # port=os.getenv("DINGODB_PORT", 3306),
-    # user=os.getenv("DINGODB_USER", "root"),
-    # password=os.getenv("DINGODB_PASSWORD",""),
-    # database=os.getenv("DINGODB_DATABASE","dingo"),
-
-    host=os.getenv("DINGODB_HOST", "172.30.14.123"),
-    port=os.getenv("DINGODB_PORT", 3307),
-    user=os.getenv("DINGODB_USER", "root"),
-    password=os.getenv("DINGODB_PASSWORD", ""),
-    database=os.getenv("DINGODB_DATABASE", "dingo"),
-)
-
-if enable_auth:
-    logger.info("Authentication enabled - ALLOWED_TOKENS configured")
-    # Initialize server with token verifier and minimal auth settings
-    # FastMCP requires auth settings when using token_verifier
-    app = FastMCP(
-        "dingodb_mcp_server",
-        token_verifier=SimpleTokenVerifier(),
-        auth=AuthSettings(
-            # Because the TokenVerifier is being used, the following two URLs only need to comply with the URL rules.
-            issuer_url="http://localhost:8000",
-            resource_server_url="http://localhost:8000",
-        ),
-    )
-else:
-    # Initialize server without authentication
-    app = FastMCP("dingodb_mcp_server")
-
-
-@app.resource("dingo://sample/{table}", description="table sample")
+@app.tool()
 def table_sample(table: str) -> str:
+    """
+        Look at the sample data for the table.
+        Args:
+            table: Name of the table to search.
+    """
     valid_table_pattern = re.compile(r'^[a-zA-Z0-9_.]+$')
     if not valid_table_pattern.match(table):
         logger.error(f"Invalid table name: {table} (contains illegal characters)")
         return f"Failed to sample table: invalid table name '{table}'"
     try:
-        with connect(**db_conn_info.model_dump()) as conn:
+        with connect(**get_db_config()) as conn:
             with conn.cursor() as cursor:
                 query = f"SELECT * FROM `{table}` LIMIT 100"
                 cursor.execute(query)
@@ -158,7 +118,7 @@ def table_sample(table: str) -> str:
 def list_tables() -> str:
     """List Dingodb tables as resources."""
     try:
-        with connect(**db_conn_info.model_dump()) as conn:
+        with connect(**get_db_config()) as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SHOW TABLES")
                 tables = cursor.fetchall()
@@ -170,13 +130,18 @@ def list_tables() -> str:
         logger.error(f"Failed to list tables: {str(e)}")
         return "Failed to list tables"
 
+
 @app.tool()
 def execute_sql(sql: str) -> str:
     """Execute an SQL on the Dingodb server."""
     logger.info(f"Calling tool: execute_sql  with arguments: {sql}")
+    return execute_sql_help(sql)
+
+
+def execute_sql_help(sql: str) -> str:
     result = {"sql": sql, "success": False, "rows": 0, "columns": None, "data": None, "error": None}
     try:
-        with connect(**db_conn_info.model_dump()) as conn:
+        with connect(**get_db_config()) as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql)
                 if cursor.description:
@@ -202,48 +167,13 @@ def execute_sql(sql: str) -> str:
     return json_result
 
 
-@app.tool()
-def get_ob_ash_report(
-    start_time: str,
-    end_time: str,
-    tenant_id: Optional[int] = None,
-) -> str:
-    """
-    Get Dingodb Active Session History report.
-    ASH can sample the status of all Active Sessions in the system at 1-second intervals, including:
-        Current executing SQL ID
-        Current wait events (if any)
-        Wait time and wait parameters
-        The module where the SESSION is located during sampling (PARSE, EXECUTE, PL, etc.)
-        SESSION status records, such as SESSION MODULE, ACTION, CLIENT ID
-    This will be very useful when you perform performance analysis.RetryClaude can make mistakes. Please double-check responses.
-
-    Args:
-        start_time: Sample Start Time,Format: yyyy-MM-dd HH:mm:ss.
-        end_time: Sample End Time,Format: yyyy-MM-dd HH:mm:ss.
-        tenant_id: Used to specify the tenant ID for generating the ASH Report. Leaving this field blank or setting it to NULL indicates no restriction on the TENANT_ID.
-    """
-    logger.info(
-        f"Calling tool: get_ob_ash_report  with arguments: {start_time}, {end_time}, {tenant_id}"
-    )
-    # Construct the SQL query
-    sql_query = f"""
-        CALL DBMS_WORKLOAD_REPOSITORY.ASH_REPORT('{start_time}','{end_time}', NULL, NULL, NULL, 'TEXT', NULL, NULL, {tenant_id if tenant_id is not None else "NULL"});
-    """
-    try:
-        return execute_sql(sql_query)
-    except Error as e:
-        logger.error(f"Error get ASH report,executing SQL '{sql_query}': {e}")
-        return f"Error get ASH report,{str(e)}"
-
-
 @app.tool(name="get_current_time", description="Get current time")
 def get_current_time() -> str:
     """Get current time from Dingodb database."""
     logger.info("Calling tool: get_current_time")
     sql_query = "SELECT NOW()"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error getting database time: {e}")
         # Fallback to system time if database query fails
@@ -259,9 +189,9 @@ def get_current_tenant() -> str:
     Get the current tenant name from dingo.
     """
     logger.info("Calling tool: get_current_tenant")
-    sql_query = "SELECT TENANT_NAME,TENANT_ID FROM dingo.DBA_OB_TENANTS"
+    sql_query = "show tenants"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
@@ -273,39 +203,148 @@ def get_all_server_nodes():
     Get all server nodes from dingo.
     You need to be sys tenant to get all server nodes.
     """
-    tenant = json.loads(get_current_tenant())["data"][0][0]
-    if tenant != "sys":
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
         raise ValueError("Only sys tenant can get all server nodes")
 
     logger.info("Calling tool: get_all_server_nodes")
-    sql_query = "select * from dingo.DBA_OB_SERVERS"
+    sql_query = "show servers"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
 
 
 @app.tool()
-def get_resource_capacity():
+def get_all_executor():
+    """
+    See what compute nodes are in the current cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_all_executor")
+    sql_query = "show executors"
+    try:
+        return execute_sql_help(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+@app.tool()
+def get_all_store():
+    """
+    See what storage nodes are in the current cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_all_store")
+    sql_query = "show store_nodes"
+    try:
+        return execute_sql_help(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+@app.tool()
+def get_all_coordinate():
+    """
+    See which coordinator nodes are present in the current cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_all_coordinate")
+    sql_query = "show coordinator_nodes"
+    try:
+        return execute_sql_help(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+@app.tool()
+def get_resource_capacity() -> str:
     """
     Get resource capacity from dingo.
     You need to be sys tenant to get resource capacity.
     """
-    tenant = json.loads(get_current_tenant())["data"][0][0]
-    if tenant != "sys":
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
         raise ValueError("Only sys tenant can get resource capacity")
     logger.info("Calling tool: get_resource_capacity")
-    sql_query = "select * from dingo.GV$OB_SERVERS"
+    sql_query = "show capacity"
     try:
-        return execute_sql(sql_query)
+        return execute_sql_help(sql_query)
     except Error as e:
         logger.error(f"Error executing SQL '{sql_query}': {e}")
         return f"Error executing query: {str(e)}"
 
 
 @app.tool()
-def search_oceanbase_document(keyword: str) -> str:
+def get_region_count():
+    """
+    Check the number of regions in the cluster.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_region_count")
+    sql_query = "show regions_count"
+    try:
+        return execute_sql_help(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+@app.tool()
+def get_store_job_list():
+    """
+    View the current cluster storage-side job information.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_store_job_list")
+    sql_query = "show store_jobs"
+    try:
+        return execute_sql_help(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+@app.tool()
+def get_gc_safe_point():
+    """
+    View the current cluster GC Safepoint.
+    """
+    tenant = json.loads(get_current_tenant())["data"][0][1]
+    if tenant != "root":
+        raise ValueError("Only sys tenant can get all server nodes")
+
+    logger.info("Calling tool: get_gc_safe_point")
+    sql_query = "show gc_safepoint"
+    try:
+        return execute_sql_help(sql_query)
+    except Error as e:
+        logger.error(f"Error executing SQL '{sql_query}': {e}")
+        return f"Error executing query: {str(e)}"
+
+
+# todo
+@app.tool()
+def search_dingodb_document(keyword: str) -> str:
     """
     This tool is designed to provide context-specific information about Dingodb to a large language model (LLM) to enhance the accuracy and relevance of its responses.
     The LLM should automatically extracts relevant search keywords from user queries or LLM's answer for the tool parameter "keyword".
@@ -315,16 +354,16 @@ def search_oceanbase_document(keyword: str) -> str:
     This tool ensures that when the LLM’s internal documentation is insufficient to generate high-quality responses, it dynamically retrieves necessary Dingodb information, thereby maintaining a high level of response accuracy and expertise.
     Important: keyword must be Chinese
     """
-    logger.info(f"Calling tool: search_oceanbase_document,keyword:{keyword}")
+    logger.info(f"Calling tool: search_dingodb_document,keyword:{keyword}")
     search_api_url = (
-        "https://cn-wan-api.oceanbase.com/wanApi/forum/docCenter/productDocFile/v3/searchDocList"
+        "https://cn-wan-api.dingodb.com/wanApi/forum/docCenter/productDocFile/v3/searchDocList"
     )
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json",
-        "Origin": "https://www.oceanbase.com",
-        "Referer": "https://www.oceanbase.com/",
+        "Origin": "https://www.dingodb.com",
+        "Referer": "https://www.dingodb.com/",
     }
     qeury_param = {
         "pageNo": 1,
@@ -346,7 +385,7 @@ def search_oceanbase_document(keyword: str) -> str:
             for item in data_array:
                 doc_url = "https://www.dingo.com/docs/" + item["urlCode"] + "-" + item["id"]
                 logger.info(f"doc_url:${doc_url}")
-                content = get_ob_doc_content(doc_url, item["id"])
+                content = get_dingodb_doc_content(doc_url, item["id"])
                 result_list.append(content)
             return json.dumps(result_list, ensure_ascii=False)
     except error.HTTPError as e:
@@ -357,7 +396,7 @@ def search_oceanbase_document(keyword: str) -> str:
         return "No results were found"
 
 
-def get_ob_doc_content(doc_url: str, doc_id: str) -> dict:
+def get_dingodb_doc_content(doc_url: str, doc_id: str) -> dict:
     doc_param = {"id": doc_id, "url": doc_url}
     doc_param = json.dumps(doc_param).encode("utf-8")
     headers = {
@@ -401,7 +440,7 @@ def get_ob_doc_content(doc_url: str, doc_id: str) -> dict:
                 "description": tdkInfo["description"],
                 "keyword": tdkInfo["keyword"],
                 "content": text,
-                "oceanbase_version": data["version"],
+                "dingodb_version": data["version"],
                 "content_updatetime": data["docGmtModified"],
             }
             return final_result
@@ -413,21 +452,18 @@ def get_ob_doc_content(doc_url: str, doc_id: str) -> dict:
         return {"result": "No results were found"}
 
 
-@app.tool(
-    # name="dingodb_text_search",
-    # description="DingoDB全文检索工具，支持指定索引名检索表中指定列包含关键词的数据",
-   )
+@app.tool()
 def dingodb_text_search(
-    table_name: str,
-    index_name: str,
-    full_text_search_column_name: str,
-    full_text_search_expr: str,
-    condition_query: Optional[list[str]] = None,
-    output_column_name: Optional[list[str]] = None,
-    limit: int = 5
+        table_name: str,
+        index_name: str,
+        full_text_search_column_name: str,
+        full_text_search_expr: str,
+        condition_query: Optional[list[str]] = None,
+        output_column_name: Optional[list[str]] = None,
+        limit: int = 5
 ) -> str:
     """
-    Search for documents using full text search in a Dingodb table.
+    Search for records using full text search in a Dingodb table.
 
     Args:
         table_name: Name of the table to search.
@@ -509,18 +545,18 @@ def dingodb_text_search(
     if len(where_clause) > 0:
         sql += " WHERE " + where_clause
     logger.info(f"Calling tool: dingodb_text_search with generated SQL: {sql}")
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 @app.tool()
 def dingodb_vector_search(
-    table_name: str,
-    vector_data: list[float],
-    vec_column_name: str = "vector",
-    # distance_func: Optional[str] = "l2",
-    # with_distance: Optional[bool] = True,
-    topk: int = 5,
-    output_column_name: Optional[list[str]] = None,
+        table_name: str,
+        vector_data: list[float],
+        vec_column_name: str = "vector",
+        # distance_func: Optional[str] = "l2",
+        # with_distance: Optional[bool] = True,
+        topk: int = 5,
+        output_column_name: Optional[list[str]] = None,
 ) -> str:
     """
     Perform vector similarity search on a Dingodb table.
@@ -563,30 +599,29 @@ def dingodb_vector_search(
         output_cols = ", ".join([f"`{col.strip()}`" for col in output_column_name])
     else:
         output_cols = "*"
-    # 向量格式转换：列表→OB支持的向量字符串（如"[0.1,0.2,0.3]"）
-    vector_str = json.dumps(vector_data).replace(" ", "")  # 去除空格，适配OB语法
+    # 向量格式转换：列表→支持的向量字符串（如"[0.1,0.2,0.3]"）
+    vector_str = json.dumps(vector_data).replace(" ", "")  # 去除空格，适配语法
     # 向量列转义
     vec_col_escaped = f"`{vec_column_name.strip()}`"
     # 表名转义
     table_escaped = f"`{table_name.strip()}`"
 
     # Dingodb向量检索核心语法（余弦相似度降序，取topk）
-    # 注：OB向量函数可根据实际版本调整（如cosine_distance/l2_distance）
     sql = f"""SELECT {output_cols} FROM vector({table_escaped}, {vec_col_escaped}, array{vector_str},{topk})""".strip()  # ASC：余弦相似度值越小，相似度越高
     logger.info(f"Calling tool: Dingodb_vector_search with vector: {vector_str}, topk: {topk}")
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
 
 @app.tool()
-def dingodb_hybrid_search(
-    table_name: str,
-    vector_data: list[float],
-    vec_column_name: str = "vector",
-    # distance_func: Optional[str] = "l2",
-    # with_distance: Optional[bool] = True,
-    filter_expr: Optional[list[str]] = None,
-    topk: int = 5,
-    output_column_name: Optional[list[str]] = None,
+def dingodb_hybrid_scalar_search(
+        table_name: str,
+        vector_data: list[float],
+        vec_column_name: str = "vector",
+        # distance_func: Optional[str] = "l2",
+        # with_distance: Optional[bool] = True,
+        filter_expr: Optional[list[str]] = None,
+        topk: int = 5,
+        output_column_name: Optional[list[str]] = None,
 ) -> str:
     """
     Perform hybrid search combining relational condition filtering(that is, scalar) and vector search.
@@ -643,7 +678,6 @@ def dingodb_hybrid_search(
     # 基础向量检索SQL（使用余弦距离排序）
     sql_base = f"""SELECT {output_cols} FROM vector({table_escaped}, {vec_col_escaped}, array{vector_str},{topk})""".strip()  # ASC：余弦相似度值越小，相似度越高
 
-
     # 拼接过滤条件（filter_expr）
     where_clause_list = []
     if filter_expr and isinstance(filter_expr, list) and len(filter_expr) > 0:
@@ -659,27 +693,402 @@ def dingodb_hybrid_search(
 
     # 4. 调用execute_sql执行混合检索
     logger.info(f"Calling tool: dingodb_hybrid_search with filter: {filter_expr}, topk: {topk}")
-    return execute_sql(sql)
+    return execute_sql_help(sql)
 
-def main():
-    """Main entry point to run the MCP server."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--transport",
-        type=str,
-        default="stdio",
-        help="Specify the MCP server transport type as stdio or sse or streamable-http.",
-    )
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=11000, help="Port to listen on")
-    args = parser.parse_args()
-    transport = args.transport
-    logger.info(f"Starting Dingodb MCP server with {transport} mode...")
-    if transport in {"sse", "streamable-http"}:
-        app.settings.host = args.host
-        app.settings.port = args.port
-    app.run(transport=transport)
+
+# done
+@app.tool()
+def query_running_tasks() -> str:
+    """
+    Queries for the tasks currently executing under the current user.
+    """
+    logger.info("Calling tool: dingodb_running_tasks")
+    sql = "select * from INFORMATION_SCHEMA.dingo_sql_job"
+    return execute_sql_help(sql)
+
+
+# done
+@app.tool()
+def query_time_over_5_minutes_tasks() -> str:
+    """
+    Queries for SQL tasks that take more than 5 minutes to execute under the current user.
+    """
+    logger.info("Calling tool: dingodb_time_over_5_minutes_tasks")
+    sql = "select * from INFORMATION_SCHEMA.processlist where command='query' and time_cost>0"
+    return execute_sql_help(sql)
+
+
+if ENABLE_MEMORY:
+    from pydingovector.client.dingo_vec_client import DingoVecClient
+    from sqlalchemy import text
+
+    class DingodbMemory:
+        def __init__(self):
+            self.embedding_client = self._gen_embedding_client()
+            self.embedding_dimension = len(self.embedding_client.embed_query("test"))
+            logger.info(f"embedding_dimension: {self.embedding_dimension}")
+
+            self._init_dingodb_vector()
+
+        def gen_embedding(self, text: str) -> List[float]:
+            return self.embedding_client.embed_query(text)
+
+        def _gen_embedding_client(self):
+            """
+            Generate embedding client.
+            """
+            if EMBEDDING_MODEL_PROVIDER == "huggingface":
+                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+                from langchain_huggingface import HuggingFaceEmbeddings
+
+                logger.info(f"Using HuggingFaceEmbeddings model: {EMBEDDING_MODEL_NAME}")
+                return HuggingFaceEmbeddings(
+                    model_name=EMBEDDING_MODEL_NAME,
+                    encode_kwargs={"normalize_embeddings": True},
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported embedding model provider: {EMBEDDING_MODEL_PROVIDER}"
+                )
+
+        def _init_dingodb_vector(self):
+            """
+            Initialize the OBVector.
+            """
+            create_table_sql = f"""
+                      create table if not exists {TABLE_NAME_MEMORY}(
+                      id bigint auto_increment,
+                      name    varchar(50),
+                      sex    varchar(50),
+                      department   varchar(50),
+                      content varchar(8000),
+                      meta    varchar(10000),
+                      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      embedding float array not null,
+                      INDEX text_index TEXT(id, department, content) engine=TXN_BTREE PARTITION BY RANGE values(10) parameters(text_fields='{{"department": {{"tokenizer": {{"type": "stem"}}}}, "content": {{"tokenizer": {{"type": "stem"}}}}, "id": {{"tokenizer": {{"type": "i64"}}}}}}'),
+                      index embedding_index vector(id, embedding) parameters(type=hnsw, metricType=L2, dimension={self.embedding_dimension}, efConstruction=40, nlinks=32),
+                      primary key(id)
+                      )comment 'columnar=1';
+                 """
+            res = execute_sql_help(create_table_sql)
+            print(res)
+
+
+
+        def _get_client(self):
+            return DingoVecClient(
+                uri=db_conn_info["host"] + ":" + str(db_conn_info["port"]),
+                user=db_conn_info["user"],
+                password=db_conn_info["password"],
+                db_name=db_conn_info["database"],
+            )
+
+    dingo_memory = DingodbMemory()
+
+
+    def dingodb_hybrid_full_search(
+            table_name: str,
+            query_text: str,
+            vec_column_name: str = "vector",
+            full_index_name: str = "full_index",
+            filter_expr: str = None,
+            topk: int = 5,
+            output_column_name: Optional[list[str]] = None,
+    ) -> str:
+        """
+        Perform hybrid search combining relational condition filtering(that is, scalar) and vector search.
+
+        Args:
+            table_name: Name of the table to search.
+            vector_data: Query vector.
+            vec_column_name: column name containing vectors to search.
+            # distance_func: The index distance algorithm used when comparing the distance between two vectors.
+            # with_distance: Whether to output distance data.
+            filter_expr: Scalar conditions requiring filtering in where clause.
+            topk: Number of results returned.
+            output_column_name: Returned table fields,unless explicitly requested, please do not provide.
+        """
+        table_escaped = f"`{table_name.strip()}`"
+        # 向量列/表名转义
+        vec_col_escaped = f"`{vec_column_name.strip()}`"
+
+        # 1. 基础参数校验
+        if not table_name:
+            return json.dumps({
+                "sql": "", "success": False, "rows": 0, "columns": None, "data": None,
+                "error": "[Error]: 表名table_name为必填参数"
+            }, ensure_ascii=False)
+
+        # 2. 处理输出列
+        if output_column_name and isinstance(output_column_name, list) and len(output_column_name) > 0:
+            output_cols = ", ".join([f"{table_escaped}.`{col.strip()}`" for col in output_column_name])
+        else:
+            output_cols = f"{table_escaped}.*"
+
+        vector_sql = ""
+        # 3. 处理向量
+        if query_text != "":
+            vector_data = dingo_memory.gen_embedding(query_text),
+            if len(vector_data) == 0 or len(vector_data[0]) == 0:
+                return json.dumps({
+                    "sql": "", "success": False, "rows": 0, "columns": None, "data": None,
+                    "error": "[Error]: 向量数据vector_data必须是非空浮点型列表"
+                }, ensure_ascii=False)
+
+            # 校验向量元素类型（确保是浮点型）
+            try:
+                f_vector_data = [float(vec) for vec in vector_data[0]]
+            except ValueError:
+                return json.dumps({
+                    "sql": "", "success": False, "rows": 0, "columns": None, "data": None,
+                    "error": "[Error]: 向量数据vector_data必须全为浮点型数值"
+                }, ensure_ascii=False)
+
+            # 3. 拼接DingoDB混合检索SQL（向量检索+条件过滤）
+            # 向量格式转换：列表→DingoDB支持的向量字符串
+            vector_str = json.dumps(f_vector_data).replace(" ", "")  # 去除空格，适配语法
+            vector_sql = f""" vector({table_escaped}, {vec_col_escaped}, array{vector_str},{topk}) """
+
+        # 组合完整SQL
+        full_sql = f""" text_search({table_escaped}, {full_index_name}, '{filter_expr}', {topk}) """
+
+        # 基础向量检索SQL（使用余弦距离排序）
+        sql_base = f"""SELECT {output_cols} FROM {table_escaped} LEFT JOIN ( select * from hybrid_search({full_sql}, {vector_sql},0.9,0.1)) s on {table_escaped}.id = s.id LIMIT {topk} """.strip()  # ASC：余弦相似度值越小，相似度越高
+        # 4. 调用execute_sql执行混合检索
+        logger.info(f"Calling tool: dingodb_hybrid_search with filter: {filter_expr}, topk: {topk}")
+        return execute_sql_help(sql_base)
+
+
+    def dingo_memory_insert(name: str, sex: str, department: str, content: str, meta: dict):
+        """
+        💾 INTELLIGENT MEMORY ORGANIZER 💾 - SMART CATEGORIZATION & MERGING!
+
+        🔥 CRITICAL 4-STEP WORKFLOW: ALWAYS follow this advanced process:
+        1️⃣ **SEARCH RELATED**: Use dingo_memory_query to find ALL related memories by category
+        2️⃣ **ANALYZE CATEGORIES**: Classify new info and existing memories by semantic type
+        3️⃣ **SMART DECISION**: Merge same category, separate different categories
+        4️⃣ **EXECUTE ACTION**: Update existing OR create new categorized records
+
+        This tool must be invoked **immediately** when the user explicitly or implicitly discloses any of the following personal facts.
+        Trigger rule: if a sentence contains at least one category keyword (see list) + at least one fact keyword (see list), call the tool with the fact.
+        Categories & sample keywords
+        - Demographics: age, years old, gender, born, date of birth, nationality, hometown, from
+        - Work & education: job title, engineer, developer, tester, company, employer, school, university, degree, major, skill, certificate
+        - Geography & time: live in, reside, city, travel, time-zone, frequent
+        - Preferences & aversions: love, hate, favourite, favorite, prefer, dislike, hobby, food, music, movie, book, brand, color
+        - Lifestyle details: pet, dog, cat, family, married, single, daily routine, language, religion, belief
+        - Achievements & experiences: award, project, competition, achievement, event, milestone
+
+        Fact keywords (examples)
+        - “I am …”, “I work as …”, “I studied …”, “I live in …”, “I love …”, “My birthday is …”
+
+        Example sentences that must trigger:
+        - “I’m 28 and work as a test engineer at Acme Corp.”
+        - “I graduated from Tsinghua with a master’s in CS.”
+        - “I love jazz and hate cilantro.”
+        - “I live in Berlin, but I’m originally from São Paulo.”
+
+        🎯 SMART CATEGORIZATION EXAMPLES:
+        ```
+        📋 Scenario 1: Category Merging
+        Existing: "User likes playing football and drinking coffee"
+        New Input: "I like badminton"
+
+        ✅ CORRECT ACTION: Use dingo_memory_update!
+        → Search "sports preference" → Find existing → Separate categories:
+        → Update mem_id_X: "User likes playing football and badminton" (sports)
+        → Create new: "User likes drinking coffee" (food/drinks)
+
+        📋 Scenario 2: Same Category Addition
+        Existing: "User likes playing football"
+        New Input: "I also like tennis"
+
+        ✅ CORRECT ACTION: Use dingo_memory_update!
+        → Search "sports preference" → Find id → Update:
+        → "User likes playing football and tennis"
+
+        📋 Scenario 3: Different Category
+        Existing: "User likes playing football"
+        New Input: "I work in Shanghai"
+
+        ✅ CORRECT ACTION: New memory!
+        → Search "work location" → Not found → Create new record
+        ```
+
+        🏷️ SEMANTIC CATEGORIES (Use for classification):
+        - **Sports/Fitness**: football, basketball, swimming, gym, yoga, running, marathon, workout, cycling, hiking, tennis, badminton, climbing, fitness routine, coach, league, match, etc.
+        - **Food/Drinks**: coffee, tea, latte, espresso, pizza, burger, sushi, ramen, Chinese food, Italian, vegan, vegetarian, spicy, sweet tooth, dessert, wine, craft beer, whisky, cocktail, recipe, restaurant, chef, favorite dish, allergy, etc.
+        - **Work/Career**: job, position, role, title, engineer, developer, tester, QA, PM, manager, company, employer, startup, client, project, deadline, promotion, salary, office, remote, hybrid, skill, certification, degree, university, bootcamp, portfolio, resume, interview
+        - **Personal**: spouse, partner, married, single, dating, pet, dog, cat, hometown, birthday, age, gender, nationality, religion, belief, daily routine, morning person, night owl, commute, language, hobby, travel, bucket list, milestone, achievement, award
+        - **Technology**: programming language, Python, Java, JavaScript, Go, Rust, framework, React, Vue, Angular, Spring, Django, database, MySQL, PostgreSQL, MongoDB, Redis, cloud, AWS, Azure, GCP, Docker, Kubernetes, CI/CD, Git, API, microservices, DevOps, automation, testing tool, Selenium, Cypress, JMeter, Postman
+        - **Entertainment**: movie, film, series, Netflix, Disney+, HBO, director, actor, genre, thriller, comedy, drama, music, playlist, Spotify, rock, jazz, K-pop, classical, concert, book, novel, author, genre, fiction, non-fiction, Kindle, audiobook, game, console, PlayStation, Xbox, Switch, Steam, board game, RPG, esports
+
+        🔍 SEARCH STRATEGIES BY CATEGORY:
+        - Sports: "sports preference favorite activity exercise gym routine"
+        - Food: "food drink preference favorite taste cuisine beverage"
+        - Work: "work job career company location title project skill"
+        - Personal: "personal relationship lifestyle habit pet birthday"
+        - Tech: "technology programming tool database framework cloud"
+        - Entertainment: "entertainment movie music book game genre favorite"
+
+        📝 PARAMETERS:
+        - name:  The patient's name
+        - sex: The gender of the patient
+        - department: The patient's registration department
+        - content: ALWAYS categorized English format ("User likes playing [sports]", "User drinks [beverages]")
+        - meta: {"type":"preference", "category":"sports/food/work/tech", "subcategory":"team_sports/beverages"}
+
+        🎯 GOLDEN RULE: Same category = UPDATE existing! Different category = CREATE separate!
+        """
+        json_str = json.dumps(meta, ensure_ascii=False, indent=4)
+        insert_sql = f"""
+                            insert into {TABLE_NAME_MEMORY} (name, sex, department, content, meta, embedding) values ('{name}','{sex}','{department}','{content}', '{json_str}', array{dingo_memory.gen_embedding(content)})
+                        """
+        return execute_sql_help(insert_sql)
+
+    def dingo_memory_delete(id: int):
+        """
+        🗑️ MEMORY ERASER 🗑️ - PERMANENTLY DELETE UNWANTED MEMORIES!
+
+        ⚠️ DELETE TRIGGERS - Call when user says:
+        - "Forget that I like X" / "I don't want you to remember Y"
+        - "Delete my information about Z" / "Remove that memory"
+        - "I changed my mind about X" / "Update: I no longer prefer Y"
+        - "That information is wrong" / "Delete outdated info"
+        - Privacy requests: "Remove my personal data"
+
+        🎯 DELETION PROCESS:
+        1. FIRST: Use dingo_memory_query to find relevant memories
+        2. THEN: Use the exact ID from query results for deletion
+        3. NEVER guess or generate IDs manually!F
+
+        📝 PARAMETERS:
+        - id: EXACT ID from dingo_memory_query results (integer)
+        - ⚠️ WARNING: Deletion is PERMANENT and IRREVERSIBLE!
+
+        🔒 SAFETY RULE: Only delete when explicitly requested by user!
+        """
+
+        delete_sql = f"""
+                           delete from  {TABLE_NAME_MEMORY} where id = {id}
+                       """
+        return execute_sql_help(delete_sql)
+
+    def dingo_memory_update(id: int, content: str, meta: dict):
+        """
+        ✏️ MULTILINGUAL MEMORY UPDATER ✏️ - KEEP MEMORIES FRESH AND STANDARDIZED!
+
+        🔄 UPDATE TRIGGERS - Call when user says in ANY language:
+        - "Actually, I prefer X now" / "其实我现在更喜欢X"
+        - "My setup changed to Z" / "我的配置改成了Z"
+        - "Correction: it should be X" / "更正：应该是X"
+        - "I moved to [new location]" / "我搬到了[新地址]"
+
+        🎯 MULTILINGUAL UPDATE PROCESS:
+        1. **SEARCH**: Use dingo_memory_query to find existing memory (search in English!)
+        2. **STANDARDIZE**: Convert new information to English format
+        3. **UPDATE**: Use exact id from query results with standardized content
+        4. **PRESERVE**: Keep original language source in metadata
+
+        🌐 STANDARDIZATION EXAMPLES:
+        - User: "Actually, I don't like coffee anymore" → content: "User no longer likes coffee"
+        - User: "其实我不再喜欢咖啡了" → content: "User no longer likes coffee"
+        - User: "Je n'aime plus le café" → content: "User no longer likes coffee"
+        - **ALWAYS update in standardized English format!**
+
+        📝 PARAMETERS:
+        - id: EXACT ID from dingo_memory_query results (integer)
+        - content: ALWAYS in English, standardized format ("User now prefers X")
+        - meta: Updated metadata {"type":"preference", "category":"...", "updated":"2024-..."}
+
+        🔥 CONSISTENCY RULE: Maintain English storage format for all updates!
+        """
+
+        json_str = json.dumps(meta, ensure_ascii=False, indent=4)
+        update_sql = f"""
+                               update {TABLE_NAME_MEMORY} set content = '{content}', meta = '{json_str}', embedding = array{dingo_memory.gen_embedding(content)} where id = {id}
+                           """
+        return execute_sql_help(update_sql)
+
+
+
+    app.add_tool(dingodb_hybrid_full_search)
+    app.add_tool(dingo_memory_insert)
+    app.add_tool(dingo_memory_delete)
+    app.add_tool(dingo_memory_update)
+
+
+@app.tool()
+def dingodb_import_doc(dir_path: str,
+                       table_name: str = "default_knowledge_base") -> list[TextContent]:
+    """
+    将本地某个目录下的所有后缀为docx和md文件导入到DingoDB中,生成一个知识库.
+
+    Args:
+        dir_path: 本地目录.
+        table_name: 要查询知识库的名称,为表的名称(默认使用default_knowledge_base).
+    """
+    config = get_db_config()
+    doc_import = DocImport(config)
+    logger.info(f"will import files in {dir_path} to table {table_name}")
+    result_text = doc_import.import_doc(dir_path, table_name)
+    return [TextContent(type="text", text=f"{result_text}")]
+
+
+@app.tool()
+def dingodb_search_doc(text: str,
+                       table_name: str = "default_knowledge_base",
+                       count: int = 5) -> list[TextContent]:
+    """
+    从DingoDB导入的知识库中搜索相关的知识文档.
+
+    Args:
+        text: 要搜索的内容.
+        table_name: 要查询知识库的名称,为表的名称(默认使用default_knowledge_base).
+        count: 返回的知识的条目,默认为5条.
+    """
+    config = get_db_config()
+    doc_import = DocImport(config)
+    logger.info(f"will query_knowledge,text={text},count={count},table_name={table_name}")
+    result = doc_import.query_knowledge(text, count, table_name)
+    return [TextContent(type="text", text=f"{result}")]
+
+
+@app.tool()
+def dingodb_text_2_sql(natural_language_query: str) -> str:
+    """
+    端到端自然语言转MSQL工具方法
+
+    Args:
+        natural_language_query: 自然语言查询语句（如"查询所有年龄大于18的用户"）
+
+    Returns:
+        包含执行状态、SQL、错误信息、查询结果的字典
+    """
+    config = get_db_config()
+    nl2SQLTool = NL2SQLTool(config)
+    # 1. 生成SQL
+    sql = nl2SQLTool.generate_sql(natural_language_query)
+    # if sql_error:
+    #     return json.dumps({
+    #         "status": "failed",
+    #         "error": sql_error,
+    #         "sql": None,
+    #         "results": None
+    #     })
+    return sql
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8001, help="SSE 服务端口")  # 默认值改为 8001
+    parser.add_argument("--host", default="0.0.0.0", help="绑定主机")
+    parser.add_argument("--transport", default="sse", help="部署方式")  # sse/streamable-http
+    args = parser.parse_args()
+
+    # ========== 关联参数到 FastMCP 配置 ==========
+    if args.port:
+        app.settings.port = args.port
+    if args.host:
+        app.settings.host = args.host
+    app.run(transport=f"{args.transport}")
