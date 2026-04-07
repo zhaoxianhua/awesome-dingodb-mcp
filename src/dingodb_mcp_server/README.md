@@ -1,11 +1,11 @@
 English | [简体中文](README_CN.md)
 # DingoDB MCP Server
 
-DingoDB MCP Server can interact with DingoDB through MCP (Model Context Protocol). Using an MCP-compatible client to connect to a DingoDB database, you can list all tables, read data, and execute SQL, then use large language models to further analyze the data in the database.
+DingoDB MCP Server can interact with DingoDB through MCP (Model Context Protocol). Using an MCP-compatible client to connect to a DingoDB database, you can list all tables, read data, and execute SQL. Then, you can use large language models to further analyze the data in the database.
 
 [<img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor">](https://cursor.com/en/install-mcp?name=DingoDB-MCP&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLWZyb20iLCAib2NlYW5iYXNlLW1jcCIsICJvY2VhbmJhc2VfbWNwX3NlcnZlciJdLCAiZW52IjogeyJPQl9IT1NUIjogIiIsICJPQl9QT1JUIjogIiIsICJPQl9VU0VSIjogIiIsICJPQl9QQVNTV09SRCI6ICIiLCAiT0JfREFUQUJBU0UiOiAiIn19)
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Features](#-features)
 - [Available Tools](#-available-tools)
@@ -26,15 +26,15 @@ DingoDB MCP Server can interact with DingoDB through MCP (Model Context Protocol
 - [License](#-license)
 - [Contributing](#-contributing)
 
-## ✨ Features
+## Features
 
 - **Database Operations**: List tables, read data, execute SQL queries
 - **AI Memory System**: Persistent vector memory based on DingoDB
 - **Advanced Search**: Full-text search, vector search, and hybrid search
 - **Security**: Authentication support and secure database access
-- **Multiple Transport Modes**: Support for stdio, SSE, and Streamable HTTP modes
+- **Multiple Transport Modes**: Supports stdio, SSE, and Streamable HTTP modes
 
-## 🛠️ Available Tools
+## Available Tools
 
 ### Core Database Tools
 - [✔️] **Execute SQL Statement** - Run custom SQL commands
@@ -42,51 +42,51 @@ DingoDB MCP Server can interact with DingoDB through MCP (Model Context Protocol
 - [✔️] **Query All Server Nodes** - List all server nodes (root tenant only)
 - [✔️] **Query Resource Information** - View resource capacity (root tenant only)
 
-### Search & Memory Tools
-- [✔️] **Search DingoDB Documents** - Search official documentation (experimental)
-- [✔️] **AI Memory System** - Vector-based persistent memory (experimental)
-- [✔️] **Full-Text Search** - Search documents in DingoDB tables
+### Search and Memory Tools
+- [✔️] **Search DingoDB Documentation** - Search official documentation (experimental feature)
+- [✔️] **AI Memory System** - Vector-based persistent memory (experimental feature)
+- [✔️] **Full-text Search** - Search documents in DingoDB tables
 - [✔️] **Vector Similarity Search** - Perform vector-based similarity search
-- [✔️] **Hybrid Search** - Combine relational filtering and vector search
+- [✔️] **Hybrid Search** - Combine relational filtering with vector search
 
-> **Note**: Experimental tools may have their APIs change as they evolve.
+> **Note**: Experimental tools may have changing APIs as they evolve.
 
-## 📋 Prerequisites
+## Prerequisites
 
 You need to have a DingoDB database. You can:
 - **Local Installation**: Refer to the [Installation Guide](https://dingodb.readthedocs.io/en/latest/deployment/standalone/windows.html)
 
-## 🚀 Installation
+## Installation
 
 ### Install from Source
 
-#### 1. Clone the Repository
+#### 1. Clone the repository
 ```bash
 git clone https://github.com/dingodb/awesome-dingodb-mcp.git
 cd awesome-dingodb-mcp/src/dingodb_mcp_server
 ```
 
-#### 2. Install Python Package Manager and Create Virtual Environment
+#### 2. Install Python package manager and create virtual environment
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
-source .venv/bin/activate  # On Windows, execute `.venv\Scripts\activate`
+source .venv/bin/activate  # On Windows, run `.venv\Scripts\activate`
 ```
 
-#### 3. Configure Environment (Optional)
+#### 3. Configure environment (optional)
 If you want to use a `.env` file for configuration:
 ```bash
 cp .env.template .env
-# Edit the .env file with your DingoDB connection information
+# Edit .env file with your DingoDB connection information
 ```
 
-#### 4. Handle Network Issues (Optional)
+#### 4. Handle network issues (optional)
 If you encounter network issues, you can use the Aliyun mirror:
 ```bash
 export UV_DEFAULT_INDEX="https://mirrors.aliyun.com/pypi/simple/"
 ```
 
-#### 5. Install Dependencies
+#### 5. Install dependencies
 ```bash
 uv pip install .
 ```
@@ -97,7 +97,8 @@ Quick installation via pip:
 ```bash
 uv pip install dingodb-mcp
 ```
-## ⚙️ Configuration
+
+## Configuration
 
 There are two ways to configure DingoDB connection information:
 
@@ -106,15 +107,16 @@ Set the following environment variables:
 
 ```bash
 DINGODB_HOST=localhost     # Database host address
-DINGODB_PORT=2881         # Optional database port (default is 2881 if not configured)
-DINGODB_USER=your_username
-DINGODB_PASSWORD=your_password
-DINGODB_DATABASE=your_database
+DINGODB_PORT=3307         # Optional database port (default is 3307 if not configured)
+DINGODB_USER=root
+DINGODB_PASSWORD=xxxxxx
+DINGODB_DATABASE=dingo
 ```
 
-### Method 2: .env File
+### Method 2: .env file
 Configure in the `.env` file (copy from `.env.template` and modify).
-## 🚀 Quick Start
+
+## Quick Start
 
 DingoDB MCP Server supports three transport modes:
 
@@ -135,10 +137,10 @@ Add the following to your MCP client configuration file:
       ],
       "env": {
         "DINGODB_HOST": "localhost",
-        "DINGODB_PORT": "2881",
-        "DINGODB_USER": "your_username",
-        "DINGODB_PASSWORD": "your_password",
-        "DINGODB_DATABASE": "your_database"
+        "DINGODB_PORT": "3307",
+        "DINGODB_USER": "root",
+        "DINGODB_PASSWORD": "xxxxxx",
+        "DINGODB_DATABASE": "dingo"
       }
     }
   }
@@ -147,7 +149,7 @@ Add the following to your MCP client configuration file:
 
 ### SSE Mode
 
-Start the SSE mode server:
+Start the SSE mode server in the src/dingodb_mcp_server directory:
 
 ```bash
 uv run dingodb_mcp_server --transport sse --port 8000
@@ -155,16 +157,17 @@ uv run dingodb_mcp_server --transport sse --port 8000
 
 **Parameter Description:**
 - `--transport`: MCP server transport type (default: stdio)
-- `--host`: Bind address (default: 127.0.0.1, use 0.0.0.0 for remote access)
-- `--port`: Listening port (default: 8000)
+- `--host`: Bind to host (default: 127.0.0.1, use 0.0.0.0 for remote access)
+- `--port`: Listen port (default: 8000)
 
-**Alternative Startup (without uv):**
+**Alternative startup method (without uv):**
 ```bash
 cd dingodb_mcp/ && python3 -m server --transport sse --port 8000
 ```
 
 **Configure URL:** `http://ip:port/sse`
-#### Client Configuration Example
+
+#### Client Configuration Examples
 
 **VSCode Plugin Cline:**
 ```json
@@ -187,6 +190,7 @@ cd dingodb_mcp/ && python3 -m server --transport sse --port 8000
   "url": "http://ip:port/sse"
 }
 ```
+
 **Cherry Studio:**
 - MCP → General → Type: Select "Server-Sent Events (sse)" from the dropdown
 
@@ -198,14 +202,14 @@ Start the Streamable HTTP mode server:
 uv run dingodb_mcp_server --transport streamable-http --port 8000
 ```
 
-**Alternative Startup (without uv):**
+**Alternative startup method (without uv):**
 ```bash
 cd dingodb_mcp/ && python3 -m server --transport streamable-http --port 8000
 ```
 
 **Configure URL:** `http://ip:port/mcp`
 
-#### Client Configuration Example
+#### Client Configuration Examples
 
 **VSCode Plugin Cline:**
 ```json
@@ -231,11 +235,12 @@ cd dingodb_mcp/ && python3 -m server --transport streamable-http --port 8000
 
 **Cherry Studio:**
 - MCP → General → Type: Select "Streamable HTTP (streamableHttp)" from the dropdown
-## 🔧 Advanced Features
 
-### 🔐 Authentication
+## Advanced Features
 
-Configure the `ALLOWED_TOKENS` variable in environment variables or `.env` file. Add `"Authorization": "Bearer <token>"` to MCP client request headers. Only requests with valid tokens can access the MCP server services.
+### Authentication
+
+Configure the `ALLOWED_TOKENS` variable in environment variables or `.env` file. Add `"Authorization": "Bearer <token>"` to the MCP client request header. Only requests with a valid token can access the MCP server services.
 
 **Example:**
 ```bash
@@ -268,116 +273,136 @@ ALLOWED_TOKENS=tokenOne,tokenTwo
 **Cline:**
 - Cline currently does not support setting Authorization in request headers
 - Refer to this [issue](https://github.com/cline/cline/issues/4391) for updates
-### 🧠 AI Memory System
 
-**Experimental Feature**: A persistent memory system based on DingoDB's advanced vector capabilities, giving your AI assistant super memory.
+### AI Memory System
+
+**Experimental Feature**: A persistent memory system based on DingoDB's advanced vector capabilities, giving your AI assistant a powerful memory.
 
 The memory system enables your AI to maintain continuous context across conversations without repeating personal preferences and information. Four intelligent tools work together to create a seamless memory experience:
 
-- **`dingodb_memory_query`** - Semantic search and retrieve relevant memories
+- **`dingodb_memory_query`** - Semantically search and retrieve relevant memories
 - **`dingodb_memory_insert`** - Automatically capture and store important conversation content
 - **`dingodb_memory_delete`** - Delete outdated or unwanted memories
 - **`dingodb_memory_update`** - Evolve and update memories based on new information
 
-## 📚 Examples
+## Examples
 
 Here are some examples demonstrating DingoDB MCP Server functionality:
 
 ### Example 1: List All Tables
 Question:
 ```plaintext
-How many tables are there in the test database, and what are they?
+List all tables under dingodb database
 ```
 Answer:
 ```plaintext
-Tables in test:
-t1
-t2
+Table List:
+No.	Table Name	Description
+1	cache_job	Cache job table
+2	dingospeed	Dingo performance test table
 ```
+
 ### Example 2: View Current Tenant
 Question:
 ```
-What is my current tenant name?
+View current tenant
 ```
 Answer:
 ```
-Your current tenant name is 'sys'.
+Current tenant information:
+
+Property	Value
+Tenant ID	0
+Tenant Name	root
+Created At	2020-01-01 00:00:00
 ```
+
 ### Example 3: View All Server Nodes
-You need to be the sys tenant to query all server nodes
+You need to be the root tenant to query all server nodes
+
 Question:
 ```
-Query all server nodes
+Query all service nodes
 ```
 Answer:
 ```
-Successfully queried all server nodes. Here are the details:
-
-| SVR_IP   | SVR_PORT | ID | ZONE  | SQL_PORT | WITH_ROOTSERVER | STATUS | START_SERVICE_TIME        | STOP_TIME | BLOCK_MIGRATE_IN_TIME | CREATE_TIME            | MODIFY_TIME            | BUILD_VERSION                                                                 | LAST_OFFLINE_TIME |
-|----------|----------|----|-------|----------|-----------------|--------|---------------------------|-----------|-----------------------|-------------------------|-------------------------|------------------------------------------------------------------------------|-------------------|
-| 127.0.0.1 | 2882     | 1  | zone1 | 2881     | YES             | ACTIVE | 2024-06-27 15:40:19.003123 | None      | None                  | 2024-06-19 16:39:11.749421 | 2024-06-27 15:40:21.001573 | 4.2.3.1_101000012024061216-c436ab3557c826ab31931d11ec836dc4df09d9de(Jun 12 2024 16:25:30) | None              |
-
-This table provides comprehensive information about each server node, including IP addresses, ports, zones, statuses, and timestamps.
+Service Node Information
+Service Node ID	Node Name	IP Address	Status	Role
+1	node01	192.168.1.10	ONLINE	COORDINATOR
+2	node02	192.168.1.11	ONLINE	STORE
+3	node03	192.168.1.12	ONLINE	EXECUTOR
 ```
+
 ### Example 4: View Resource Capacity
 You need to be the root tenant to query resource capacity
+
 Question:
 ```
-Query the current resource capacity information
+View resource capacity
 ```
 Answer:
 ```
-The current resource capacity information has been successfully queried. Here are the details:
-
-| SVR_IP   | SVR_PORT | ZONE  | SQL_PORT | CPU_CAPACITY | CPU_CAPACITY_MAX | CPU_ASSIGNED | CPU_ASSIGNED_MAX | MEM_CAPACITY | MEM_ASSIGNED | LOG_DISK_CAPACITY | LOG_DISK_ASSIGNED | LOG_DISK_IN_USE | DATA_DISK_CAPACITY | DATA_DISK_IN_USE | DATA_DISK_HEALTH_STATUS | MEMORY_LIMIT | DATA_DISK_ALLOCATED | DATA_DISK_ABNORMAL_TIME | SSL_CERT_EXPIRED_TIME |
-|----------|----------|-------|----------|--------------|------------------|--------------|------------------|--------------|--------------|-------------------|-------------------|-----------------|--------------------|-----------------|-------------------------|--------------|---------------------|-------------------------|-----------------------|
-| 127.0.0.1 | 2882     | zone1 | 2881     | 4            | 4.0              | 2.0          | 2.0              | 5368709120    | 3221225472    | 5368709120         | 4294967296         | 3556769792       | 10737418240        | 664797184        | NORMAL                  | 6442450944    | 10737418240         | None                    | None                  |
-
-This table provides comprehensive information about the resource capacities and assignments for the server.
+Resource Capacity Information
+Type	Total Capacity	Used Capacity	Remaining Capacity
+CPU	48 cores	24 cores	24 cores
+RAM	128 GB	64 GB	64 GB
+Storage	1000 GB	750 GB	250 GB
+Disk Space	5000 GB	4500 GB	500 GB
 ```
-### Example 5: Full-Text Search
+
+### Example 5: Use Scalar Query
 Question:
 ```
-Find content in t2 table that mention "apple"
+Search in table test under index text_index for records where the description field contains "keyboard" and text_id >= 3, limit to 3 results.
 ```
 Answer:
 ```
-I have successfully queried the documents in the content field of table t2 that mention "apple". Here are the results:
+Based on the search results, using text_index in table test with conditions text_id >= 3 and description LIKE keyboard, the following records were found:
 
-1. Document ID: 2, Author: john, Age: 20, Content: I have a pear and an apple
-2. Document ID: 1, Author: david, Age: 19, Content: I have a pineapple and an apple
-3. Document ID: 3, Author: tom, Age: 21, Content: I also have a pear and an apple
+Search Results
+ID	Description	Category	Rating	Text ID	Relevance Score
+4	Plastic Keyboard	Electronics	4	4	0.3884579
 ```
-### Example 6: Vector Search
+
+### Example 6: Vector Query
 Question:
 ```
-Please search for records in table t2 that are close to the vector [0.1, 0.1, 0.1].
+Search in table test for data where the feature field vector is [0.19151945, 0.62210876, 0.43772775, 0.7853586, 0.77997583, 0.2725926, 0.27646425, 0.8018722].
 ```
 Answer:
 ```
-The vector search on table t2 has returned results successfully. I can now analyze and present these results to the user.
+Based on the query results, the unique data record in table test matching the feature vector [0.19151945, 0.62210876, 0.43772775, 0.7853586, 0.77997583, 0.2725926, 0.27646425, 0.8018722] is as follows:
 
-The search found three records that are close to the vector [0.1, 0.1, 0.1]:
-
-1. Record with id 2, name 'john', age 20, description 'I have a pear and an apple', vector '[0.1,0.1,0.2]', and distance 0.1
-2. Record with id 3, name 'tom', age 21, description 'I also have a pear and an apple', vector '[0.1,0.1,0.2]', and distance 0.1
-3. Record with id 1, name 'david', age 19, description 'I have a pineapple and an apple', vector '[0.1,0.2,0.3]', and distance 0.2236
-
-These records are ordered by their distance from the search vector, with closer matches appearing first.
+Query Result
+Field	Value
+ID	1
+Feature Vector	[0.19151945, 0.62210876, 0.43772775,
+0.7853586, 0.77997583, 0.2725926,
+0.27646425, 0.8018722]
+Feature ID	1
+Description	Plastic Keyboard
+Category	Electronics
+Rating	4
+Text ID	1
+Distance Value	0.0 (exact match)
 ```
-### Example 7: Hybrid Search
-Perform hybrid query with relational filtering (scalar) and vector, using both vector and scalar as query conditions
+
+### Example 7: Hybrid Query
+Perform hybrid query with relational condition filtering (scalar) and vector, using both vector and scalar as query conditions
+
 Question:
 ```
-Please find the record in table t2 that has a vector close to [0.1, 0.1, 0.2] and an age of 20.
+Search in table test for data where the feature field vector is [0.19151945, 0.62210876, 0.43772775, 0.7853586, 0.77997583, 0.2725926, 0.27646425, 0.8018722], and under index text_index where description field contains "keyboard", text_id >= 3
 ```
 Answer:
 ```
-The record in table `t2` that has a vector close to `[0.1, 0.1, 0.2]` and an age of 20 is:
-(2, 'john', 20, 'I have a pear and an apple', '[0.1,0.1,0.2]', 0.0)
+Query results (total 2 records):
+ID	text_id	Description	Category	Vector Distance	Rating
+5	5	KYO Keyboard	Electronics	0.0 (exact match)	5
+4	4	Plastic Keyboard	Electronics	1.3437778	4
 ```
 
-### Example 8: Cross-Session Intelligent Memory
+### Example 8: Cross-session Intelligent Memory
 
 Experience the powerful capability of cross-session intelligent memory:
 
@@ -389,33 +414,33 @@ AI: "Got it, I've remembered your preferences and work information!"
 
 📅 Wednesday Conversation
 User: "Recommend some sports I might be interested in"
-AI: 🔍 [Automatically calls dingodb_memory_query to search for "sports preference"]
+AI: 🔍 [Automatically calls dingodb_memory_query to search "sports preferences"]
     "Based on your preferences mentioned earlier, I recommend football and basketball related activities! You mentioned
-     you don't like swimming much, so I'm recommending some land sports for you..."
+    that you don't like swimming much, so I recommend some land sports for you..."
 
-📅 One Week Later
-User: "Where is my workplace? What programming language do you use?"
-AI: 🔍 [Automatically calls dingodb_memory_query to search for "work programming"]
+📅 One Week Later Conversation
+User: "Where is my workplace? What programming language do I use?"
+AI: 🔍 [Automatically calls dingodb_memory_query to search "work programming"]
     "You work in Shanghai, mainly using Python for development."
 ```
 
-## 🔒 Security
+## Security
 
 This MCP server requires database access to function properly. Please follow these security best practices:
 
 ### Basic Security Measures
 
-1. **Create a dedicated DingoDB user** with minimum privileges
+1. **Create a dedicated DingoDB user** with minimal privileges
 2. **Do not use root user** or admin accounts
 3. **Limit database access** to only necessary operations
 4. **Enable logging** for auditing purposes
-5. **Regularly conduct security reviews** of database access
+5. **Perform regular security reviews** of database access
 
 ### Security Checklist
 
 - ❌ Do not commit environment variables or credentials to version control
-- ✅ Use database users with minimum required privileges
-- ✅ Consider implementing query whitelists in production
+- ✅ Use database users with the minimum required privileges
+- ✅ Consider implementing query whitelisting in production environments
 - ✅ Monitor and log all database operations
 - ✅ Use authentication tokens for API access
 
@@ -427,17 +452,17 @@ See the [DingoDB Security Configuration Guide](./SECURITY.md) for detailed instr
 - Monitoring database access
 - Security best practices
 
-> ⚠️ **Important**: Always follow the principle of least privilege when configuring database access.
+> **Important**: Always follow the principle of least privilege when configuring database access.
 
-## 📄 License
+## License
 
 Apache License - See the [LICENSE](LICENSE) file for details.
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please follow these steps:
 
-1. **Fork the Repository**
+1. **Fork the repository**
 2. **Create your feature branch**
    ```bash
    git checkout -b feature/amazing-feature

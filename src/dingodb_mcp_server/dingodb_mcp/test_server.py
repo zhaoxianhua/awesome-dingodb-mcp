@@ -2,7 +2,8 @@ from pydingovector.tool.doc_import import DocImport
 from .server import execute_sql, list_tables, table_sample, get_current_time, dingodb_text_search, \
     dingodb_vector_search, dingodb_hybrid_scalar_search, query_running_tasks, query_time_over_5_minutes_tasks, \
     get_db_config, \
-    dingodb_text_2_sql, get_resource_capacity, get_all_server_nodes, dingo_memory_insert, dingodb_hybrid_full_search
+    dingodb_text_2_sql, get_resource_capacity, get_all_server_nodes, dingo_memory_insert, dingodb_hybrid_full_search, \
+    get_current_tenant
 
 
 def test_execute_sql():
@@ -20,6 +21,11 @@ def test_table_sample():
 def test_get_current_time():
     res = get_current_time()
     print(res)
+
+def test_get_current_tenant():
+    res = get_current_tenant()
+    print(res)
+
 
 def test_get_resource_capacity():
     res = get_resource_capacity()

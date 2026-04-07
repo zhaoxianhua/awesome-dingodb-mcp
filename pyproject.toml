@@ -16,7 +16,7 @@ dependencies = [
 packages = ["dingodb_mcp_server", "pydingovector"]
 
 [[project.authors]]
-name = "OceanBase"
+name = "Dingodb"
 email = "open_contact@oceanbase.com"
 
 [build-system]
@@ -33,4 +33,4 @@ include = [
 packages = ["src/dingodb_mcp"]
 
 [project.scripts]
-ocp_mcp_server = "dingodb_mcp:main"
+dcp_mcp_server = "dingodb_mcp:main"

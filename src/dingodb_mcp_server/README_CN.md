@@ -106,10 +106,10 @@ uv pip install dingodb-mcp
 
 ```bash
 DINGODB_HOST=localhost     # 数据库的地址
-DINGODB_PORT=2881         # 可选的数据库的端口（如果没有配置，默认是2881)
-DINGODB_USER=your_username
-DINGODB_PASSWORD=your_password
-DINGODB_DATABASE=your_database
+DINGODB_PORT=3307         # 可选的数据库的端口（如果没有配置，默认是3307)
+DINGODB_USER=root
+DINGODB_PASSWORD=xxxxxx
+DINGODB_DATABASE=dingo
 ```
 
 ### 方法 2: .env 文件
@@ -135,10 +135,10 @@ DingoDB MCP Server 支持三种传输模式：
       ],
       "env": {
         "DINGODB_HOST": "localhost",
-        "DINGODB_PORT": "2881",
-        "DINGODB_USER": "your_username",
-        "DINGODB_PASSWORD": "your_password",
-        "DINGODB_DATABASE": "your_database"
+        "DINGODB_PORT": "3307",
+        "DINGODB_USER": "root",
+        "DINGODB_PASSWORD": "xxxxxx",
+        "DINGODB_DATABASE": "dingo"
       }
     }
   }
@@ -147,7 +147,7 @@ DingoDB MCP Server 支持三种传输模式：
 
 ### SSE 模式
 
-启动 SSE 模式服务器：
+在src/dingodb_mcp_server目录下，启动 SSE 模式服务器：
 
 ```bash
 uv run dingodb_mcp_server --transport sse --port 8000
@@ -286,95 +286,105 @@ ALLOWED_TOKENS=tokenOne,tokenTwo
 ### 示例 1: 列出所有表
 问题：
 ```plaintext
-How many tables are there in the test database, and what are they?
+列出dingodb数据库下所有的表
 ```
 回答：
 ```plaintext
-Tables in test: 
-t1
-t2
+表清单: 
+序号	表名	描述
+1	cache_job	缓存任务表
+2	dingospeed	Dingo性能测试表
 ```
 ### Example 2: 查看当前租户
 问题：
 ```
-What is my current tenant name?
+查看当前租户
 ```
 回答：
 ```
-Your current tenant name is 'sys'.
+当前租户信息如下：
+
+属性	值
+租户ID	0
+租户名称	root
+创建时间	2020-01-01 00:00:00
 ```
 ### 例子 3: 查看所有的 server 节点
-你需要时 sys 租户才能查询所有 server 节点  
+你需要是root租户才能查询所有 server 节点  
 问题：
 ```
-Query all server nodes
+查询所有服务节点
 ```
 回答：
 ```
-Successfully queried all server nodes. Here are the details:
-
-| SVR_IP   | SVR_PORT | ID | ZONE  | SQL_PORT | WITH_ROOTSERVER | STATUS | START_SERVICE_TIME        | STOP_TIME | BLOCK_MIGRATE_IN_TIME | CREATE_TIME            | MODIFY_TIME            | BUILD_VERSION                                                                 | LAST_OFFLINE_TIME |
-|----------|----------|----|-------|----------|-----------------|--------|---------------------------|-----------|-----------------------|-------------------------|-------------------------|------------------------------------------------------------------------------|-------------------|
-| 127.0.0.1 | 2882     | 1  | zone1 | 2881     | YES             | ACTIVE | 2024-06-27 15:40:19.003123 | None      | None                  | 2024-06-19 16:39:11.749421 | 2024-06-27 15:40:21.001573 | 4.2.3.1_101000012024061216-c436ab3557c826ab31931d11ec836dc4df09d9de(Jun 12 2024 16:25:30) | None              |
-
-This table provides comprehensive information about each server node, including IP addresses, ports, zones, statuses, and timestamps.
+服务节点信息
+服务节点ID	节点名称	IP地址	状态	角色
+1	node01	192.168.1.10	ONLINE	COORDINATOR
+2	node02	192.168.1.11	ONLINE	STORE
+3	node03	192.168.1.12	ONLINE	EXECUTOR
 ```
 ### 例子 4: 查看资源容量
-你需要是 root 租户，才可以查询资源容量  
+你需要是root租户，才可以查询资源容量  
 问题：
 ```
-Query the current resource capacity information
+查看资源容量
 ```
 回答：
 ```
-The current resource capacity information has been successfully queried. Here are the details:
-
-| SVR_IP   | SVR_PORT | ZONE  | SQL_PORT | CPU_CAPACITY | CPU_CAPACITY_MAX | CPU_ASSIGNED | CPU_ASSIGNED_MAX | MEM_CAPACITY | MEM_ASSIGNED | LOG_DISK_CAPACITY | LOG_DISK_ASSIGNED | LOG_DISK_IN_USE | DATA_DISK_CAPACITY | DATA_DISK_IN_USE | DATA_DISK_HEALTH_STATUS | MEMORY_LIMIT | DATA_DISK_ALLOCATED | DATA_DISK_ABNORMAL_TIME | SSL_CERT_EXPIRED_TIME |
-|----------|----------|-------|----------|--------------|------------------|--------------|------------------|--------------|--------------|-------------------|-------------------|-----------------|--------------------|-----------------|-------------------------|--------------|---------------------|-------------------------|-----------------------|
-| 127.0.0.1 | 2882     | zone1 | 2881     | 4            | 4.0              | 2.0          | 2.0              | 5368709120    | 3221225472    | 5368709120         | 4294967296         | 3556769792       | 10737418240        | 664797184        | NORMAL                  | 6442450944    | 10737418240         | None                    | None                  |
-
-This table provides comprehensive information about the resource capacities and assignments for the server.
+资源容量信息
+类型	总容量	已使用容量	剩余容量
+CPU	48 核	24 核	24 核
+RAM	128 GB	64 GB	64 GB
+存储空间	1000 GB	750 GB	250 GB
+磁盘空间	5000 GB	4500 GB	500 GB
 ```
-### 例子 5: 使用全文查询检索文档
+### 例子 5: 使用标量查询
 问题：
 ```
-Find content in t2 table that mention "apple"
+搜索表test下索引text_index中description字段包含keyboard字符，且text_id>=3的数据，最多3条。
 ```
 回答：
 ```
-I have successfully queried the documents in the content field of table t2 that mention "apple". Here are the results:
+根据搜索结果，在表 test 下使用 text_index 并指定 text_id >= 3 和 description LIKE keyboard 的条件，找到以下记录：
 
-1. Document ID: 2, Author: john, Age: 20, Content: I have a pear and an apple
-2. Document ID: 1, Author: david, Age: 19, Content: I have a pineapple and an apple
-3. Document ID: 3, Author: tom, Age: 21, Content: I also have a pear and an apple
+搜索结果
+ID	Description	Category	Rating	Text ID	相关性得分
+4	Plastic Keyboard	Electronics	4	4	0.3884579
 ```
 ### 例子 6: 向量查询
 问题：
 ```
-Please search for records in table t2 that are close to the vector [0.1, 0.1, 0.1].
+搜索表test下字段feature向量为[0.19151945, 0.62210876, 0.43772775, 0.7853586, 0.77997583, 0.2725926, 0.27646425, 0.8018722]的数据.
 ```
 回答：
 ```
-The vector search on table t2 has returned results successfully. I can now analyze and present these results to the user.
+根据查询结果，表test中匹配特征向量 [0.19151945, 0.62210876, 0.43772775, 0.7853586, 0.77997583, 0.2725926, 0.27646425, 0.8018722] 的唯一数据记录如下：
 
-The search found three records that are close to the vector [0.1, 0.1, 0.1]:
-
-1. Record with id 2, name 'john', age 20, description 'I have a pear and an apple', vector '[0.1,0.1,0.2]', and distance 0.1
-2. Record with id 3, name 'tom', age 21, description 'I also have a pear and an apple', vector '[0.1,0.1,0.2]', and distance 0.1
-3. Record with id 1, name 'david', age 19, description 'I have a pineapple and an apple', vector '[0.1,0.2,0.3]', and distance 0.2236
-
-These records are ordered by their distance from the search vector, with closer matches appearing first.
+查询结果
+字段	值
+ID	1
+特征向量	[0.19151945, 0.62210876, 0.43772775,
+0.7853586, 0.77997583, 0.2725926,
+0.27646425, 0.8018722]
+特征ID	1
+描述	Plastic Keyboard（塑料键盘）
+类别	Electronics（电子设备）
+评分	4
+文本ID	1
+距离值	0.0（完全匹配）
 ```
 ### 例子 7: 混合查询
 进行关系条件过滤（即标量）和向量的混合查询，同时使用向量和标量作为查询条件  
 问题：
 ```
-Please find the record in table t2 that has a vector close to [0.1, 0.1, 0.2] and an age of 20.
+搜索表test下字段feature向量为[0.19151945, 0.62210876, 0.43772775, 0.7853586, 0.77997583, 0.2725926, 0.27646425, 0.8018722]，且索引text_index中description字段包含keyboard字符，text_id>=3的数据
 ```
 回答：
 ```
-The record in table `t2` that has a vector close to `[0.1, 0.1, 0.2]` and an age of 20 is:
-(2, 'john', 20, 'I have a pear and an apple', '[0.1,0.1,0.2]', 0.0)
+查询结果（共 2 条）：
+ID	text_id	Description	Category	向量距离	Rating
+5	5	KYO Keyboard	Electronics	0.0（精确匹配）	5
+4	4	Plastic Keyboard	Electronics	1.3437778	4
 ```
 
 ### 例子 8：跨会话智能记忆

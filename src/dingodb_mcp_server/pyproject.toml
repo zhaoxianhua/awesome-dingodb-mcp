@@ -1,5 +1,5 @@
 [project]
-name = "oceanbase-mcp"
+name = "dingodb-mcp"
 version = "0.0.4"
 description = "A Model Context Protocol (MCP) server that enables secure interaction with OceanBase databases. This server allows AI assistants to list tables, read data, and execute SQL queries through a controlled interface, making database exploration and analysis safer and more structured."
 readme = "README.md"
@@ -10,7 +10,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 keywords = [
-    "oceanbase",
+    "dingodb",
     "mcp",
 ]
 requires-python = ">=3.10,<3.13" # ≥ 3.13 limited by pyobvector's numpy requirement.
@@ -24,6 +24,7 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "certifi>=2022.12.7",
     "pyobvector>=0.2.15",
+    "mammoth>=1.12.0",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +48,7 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 
 [project.scripts]
-oceanbase_mcp_server = "oceanbase_mcp.server:main"
+dingodb_mcp_server = "dingodb_mcp.server:main"
 
 [build-system]
 requires = ["setuptools>=45", "wheel"]
